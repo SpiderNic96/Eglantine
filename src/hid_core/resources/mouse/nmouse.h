@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <mutex>
+#include <utility>
 
 #include "common/common_funcs.h"
 #include "common/common_types.h"
@@ -38,6 +39,16 @@ public:
     void Initialize(Common::ProcessAddress t_mem, u64 size, Kernel::KProcess* owner, s32 width,
                     s32 height);
     void Finalize();
+
+    // hid 3110 / 3111 (nn::hid::InitializeJcms / FinalizeJcms): the second buffer the SDK reads,
+    // one lifo per JcmsHandle (npad * 2 + type). Player 1's two rings are kept sampling so
+    // GetJcmsStates always has a current entry.
+    void InitializeJcms(Common::ProcessAddress t_mem, u64 size, Kernel::KProcess* owner);
+    void FinalizeJcms();
+
+    // hid 3132 / 3133 (SetNmousePointerRanges / GetNmousePointerRanges).
+    void SetPointerRange(s32 width, s32 height);
+    std::pair<s32, s32> GetPointerRange();
 
     // NmouseType bits as the application asks for them (GetNmouseHandles, GetMergedNmouseHandle).
     static constexpr u32 TypeMerged = 1u << 0;
@@ -73,33 +84,57 @@ private:
     };
     static_assert(sizeof(NmouseInfo) == InfoStride);
 
-    // Only the fields applications are seen to read are known. The SDK copies this into
-    // nn::hid::NmouseState (0x30 bytes): +0x00 to +0x24 as they are, then +0x30 to +0x24, +0x28 and
-    // +0x2c as they are.
+    // The SDK copies this into nn::hid::NmouseState (0x30 bytes): +0x00 to +0x24 as they are, then
+    // +0x30 to +0x24, +0x28 and +0x2c as they are. Field meanings follow Recompia's reading of the
+    // SDK 20.5 client (featureJosh/Recompia, runtime/docs/hid_mouse_sw2.md): its DevNmouseState
+    // conversion reads +0x18/+0x1c as the pointer range, and GetWheelDeltaDev returns +0x20 and
+    // +0x30, so the state carries no movement delta.
     struct NmouseDevState {
         u64 unknown_00;
         s64 sampling_number; // NmouseState +0x08
         s32 x; // NmouseState +0x10, the pointer, in the range given to InitializeNmouse
         s32 y; // NmouseState +0x14
-        INSERT_PADDING_BYTES(0x8);
-        s32 delta_x; // NmouseState +0x20
-        INSERT_PADDING_BYTES(0x4);
-        u32 unknown_28;
+        s32 range_width;  // NmouseState +0x18, the pointer range (InitializeNmouse or
+        s32 range_height; // NmouseState +0x1c  SetNmousePointerRanges)
+        s32 wheel_x;      // NmouseState +0x20, first value of GetWheelDeltaDev
+        INSERT_PADDING_BYTES(0x4); // development data, not in NmouseState
+        u32 buttons;   // NmouseState +0x28, nn::hid::MouseButton bits (no reader seen; Pokopia takes
+                       // the Joy-Con's ZR / R from the npad, see npad.cpp)
         u32 attribute; // NmouseState +0x2c, bit 1 must be set for applications to take the mouse as
                        // in use
-        s32 delta_y;   // NmouseState +0x24
+        s32 wheel_y;   // NmouseState +0x24, second value of GetWheelDeltaDev
         INSERT_PADDING_BYTES(0x3c);
     };
     static_assert(sizeof(NmouseDevState) == 0x70);
     static_assert(offsetof(NmouseDevState, sampling_number) == 0x08);
     static_assert(offsetof(NmouseDevState, x) == 0x10);
     static_assert(offsetof(NmouseDevState, y) == 0x14);
-    static_assert(offsetof(NmouseDevState, delta_x) == 0x20);
+    static_assert(offsetof(NmouseDevState, range_width) == 0x18);
+    static_assert(offsetof(NmouseDevState, range_height) == 0x1c);
+    static_assert(offsetof(NmouseDevState, wheel_x) == 0x20);
+    static_assert(offsetof(NmouseDevState, buttons) == 0x28);
     static_assert(offsetof(NmouseDevState, attribute) == 0x2c);
-    static_assert(offsetof(NmouseDevState, delta_y) == 0x30);
+    static_assert(offsetof(NmouseDevState, wheel_y) == 0x30);
 
     using NmouseLifo = Lifo<NmouseDevState, MaxHandles>;
     static_assert(sizeof(NmouseLifo) == LifoStride);
+
+    // The Jcms block (nn::hid::InitializeJcms, the game's 0x4000 buffer): GetJcmsStates reads the
+    // lifo at index * 0x2c8, index = npad * 2 + type (0 left, 1 right), npad < 8.
+    struct JcmsState {
+        u64 unknown_00;
+        s64 sampling_number; // +0x08
+        u64 unknown_10; // read by Pokopia's placement code (non-zero turns the player toward the
+                        // cursor); left 0
+        u64 unknown_18;
+    };
+    static_assert(sizeof(JcmsState) == 0x20);
+    static constexpr std::size_t JcmsLifoEntries = 17;
+    static constexpr std::size_t JcmsRings = 16;
+    static constexpr std::size_t JcmsSampledRings = 2; // player 1's left and right Joy-Con
+    using JcmsLifo = Lifo<JcmsState, JcmsLifoEntries>;
+    static_assert(sizeof(JcmsLifo) == 0x2c8);
+    static constexpr std::size_t JcmsMinimumSize = JcmsRings * sizeof(JcmsLifo);
 
     static constexpr u32 AttributeConnected = 1u << 0;
     static constexpr u32 AttributeActive = 1u << 1;
@@ -119,6 +154,8 @@ private:
     }};
 
     void WriteLayout();
+    void UpdateNmouse(s64 now_ns);
+    void UpdateJcms(s64 now_ns);
 
     std::mutex mutex;
     Common::ProcessAddress transfer_memory{};
@@ -135,6 +172,16 @@ private:
     s32 last_x{};
     s32 last_y{};
     std::array<NmouseLifo, Slots.size()> lifos{};
+    // Host wheel position at the previous sample (Qt reports 120 per notch, the unit the game's
+    // +-600 clamp suggests).
+    s32 last_wheel_x{};
+    s32 last_wheel_y{};
+    bool has_last_wheel{};
+
+    Common::ProcessAddress jcms_memory{};
+    Kernel::KProcess* jcms_owner{};
+    std::array<JcmsLifo, JcmsSampledRings> jcms_lifos{};
+
     Core::HID::EmulatedDevices* emulated_devices{};
 };
 

@@ -259,14 +259,14 @@ IHidServer::IHidServer(Core::System& system_, std::shared_ptr<ResourceManager> r
         {3015, nullptr, "SetDebugPadKeyboardMap"}, //21.0.0+
         // Switch 2 native input (Joy-Con 2 mouse and its shared memory), from Eden-NS2.
         {3110, C<&IHidServer::RegisterJcmsMemory>, "RegisterJcmsMemory"},
-        {3111, C<&IHidServer::NativeInputCommand3111>, "NativeInputCommand3111"},
+        {3111, C<&IHidServer::FinalizeJcms>, "FinalizeJcms"},
         {3112, C<&IHidServer::SetNativeInputFlags3112>, "SetNativeInputFlags3112"},
         {3113, C<&IHidServer::SetNativeInputFlags3113>, "SetNativeInputFlags3113"},
         {3114, &IHidServer::StubReplyZeroed, "Unknown3114"},
-        {3130, &IHidServer::StubReplyZeroed, "Unknown3130"},
+        {3130, C<&IHidServer::InitializeNmouseWithStateRange>, "InitializeNmouseWithStateRange"},
         {3131, C<&IHidServer::FinalizeNmouse>, "FinalizeNmouse"},
-        {3132, C<&IHidServer::SetNativeInputParameters>, "SetNativeInputParameters"},
-        {3133, C<&IHidServer::GetNativeInputState3133>, "GetNativeInputState3133"},
+        {3132, C<&IHidServer::SetNmousePointerRanges>, "SetNmousePointerRanges"},
+        {3133, C<&IHidServer::GetNmousePointerRanges>, "GetNmousePointerRanges"},
         {3134, &IHidServer::StubReplyZeroed, "Unknown3134"},
         {3135, C<&IHidServer::SetNativeInputEnabled3135>, "SetNativeInputEnabled3135"},
         {3136, C<&IHidServer::SetNmouseButtonConfigJoyLeftJcms>, "SetNmouseButtonConfigJoyLeftJcms"},
@@ -1587,7 +1587,10 @@ Result IHidServer::RegisterNativeInputMemory(
 Result IHidServer::RegisterJcmsMemory(ClientAppletResourceUserId aruid, u64 size,
                                       InCopyHandle<Kernel::KTransferMemory> memory) {
     LOG_INFO(Service_HID, "Native Joy-Con mouse memory: aruid={}, size={:#x}", aruid.pid, size);
-    return RegisterNativeInputMemory(1, 0, 0, 0, aruid, size, memory);
+    R_TRY(RegisterNativeInputMemory(1, 0, 0, 0, aruid, size, memory));
+    GetResourceManager()->GetNmouse()->InitializeJcms(memory->GetSourceAddress(), size,
+                                                      memory->GetOwner());
+    R_SUCCEED();
 }
 
 Result IHidServer::CheckNativeInputAruid(AppletResourceUserId aruid) const {
@@ -1603,9 +1606,12 @@ Result IHidServer::GetNativeInputFlag220(Out<bool> out_value, u32 value, AppletR
     R_SUCCEED();
 }
 
-Result IHidServer::NativeInputCommand3111(AppletResourceUserId aruid) {
-    LOG_INFO(Service_HID, "(STUBBED) Native input command 3111, aruid={}", aruid.pid);
-    return CheckNativeInputAruid(aruid);
+// 3111, nn::hid's FinalizeJcms.
+Result IHidServer::FinalizeJcms(AppletResourceUserId aruid) {
+    LOG_INFO(Service_HID, "Native Joy-Con mouse (Jcms) finalized, aruid={}", aruid.pid);
+    R_TRY(CheckNativeInputAruid(aruid));
+    GetResourceManager()->GetNmouse()->FinalizeJcms();
+    R_SUCCEED();
 }
 
 Result IHidServer::SetNativeInputFlags3112(u32 flags, AppletResourceUserId aruid) {
@@ -1646,6 +1652,20 @@ Result IHidServer::InitializeNmouse(u8 mode, u32 parameter0, u32 parameter1, u32
     R_SUCCEED();
 }
 
+// 3130, nn::hid's InitializeNmouse(NmouseStateRange): 3139's layout without its last parameter;
+// the SDK takes the width and height from its range table (1280x720 to 3840x2160). The raw aruid
+// is used, as nothing shows this command sending a PID.
+Result IHidServer::InitializeNmouseWithStateRange(u8 mode, u32 width, u32 height,
+                                                  AppletResourceUserId aruid, u64 size,
+                                                  InCopyHandle<Kernel::KTransferMemory> memory) {
+    R_TRY(RegisterNativeInputMemory(mode, width, height, 0, ClientAppletResourceUserId{aruid.pid},
+                                    size, memory));
+    GetResourceManager()->GetNmouse()->Initialize(memory->GetSourceAddress(), size,
+                                                  memory->GetOwner(), static_cast<s32>(width),
+                                                  static_cast<s32>(height));
+    R_SUCCEED();
+}
+
 // 3131, nn::hid's FinalizeNmouse.
 Result IHidServer::FinalizeNmouse(AppletResourceUserId aruid) {
     LOG_INFO(Service_HID, "Native Joy-Con mouse finalized, aruid={}", aruid.pid);
@@ -1654,16 +1674,24 @@ Result IHidServer::FinalizeNmouse(AppletResourceUserId aruid) {
     R_SUCCEED();
 }
 
-Result IHidServer::SetNativeInputParameters(u32 first, u32 second, AppletResourceUserId aruid) {
-    LOG_INFO(Service_HID, "(STUBBED) Native input parameters: {:#x}, {:#x}, aruid={}", first, second,
+// 3132, nn::hid's SetNmousePointerRanges / SetNmouseStateRanges: the range the pointer is
+// reported in from now on.
+Result IHidServer::SetNmousePointerRanges(s32 width, s32 height, AppletResourceUserId aruid) {
+    LOG_INFO(Service_HID, "Native Joy-Con mouse pointer range {}x{}, aruid={}", width, height,
              aruid.pid);
-    return CheckNativeInputAruid(aruid);
+    R_TRY(CheckNativeInputAruid(aruid));
+    GetResourceManager()->GetNmouse()->SetPointerRange(width, height);
+    R_SUCCEED();
 }
 
-Result IHidServer::GetNativeInputState3133(Out<u64> out_state, AppletResourceUserId aruid) {
-    LOG_INFO(Service_HID, "(STUBBED) Native input state 3133, aruid={}", aruid.pid);
-    *out_state = 0;
-    return CheckNativeInputAruid(aruid);
+// 3133, nn::hid's GetNmousePointerRanges / GetNmouseStateRanges.
+Result IHidServer::GetNmousePointerRanges(Out<s32> out_width, Out<s32> out_height,
+                                          AppletResourceUserId aruid) {
+    R_TRY(CheckNativeInputAruid(aruid));
+    const auto [width, height] = GetResourceManager()->GetNmouse()->GetPointerRange();
+    *out_width = width;
+    *out_height = height;
+    R_SUCCEED();
 }
 
 Result IHidServer::SetNativeInputEnabled3135(u8 enabled, AppletResourceUserId aruid) {

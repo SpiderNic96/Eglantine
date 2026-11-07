@@ -283,15 +283,18 @@ private:
                               InCopyHandle<Kernel::KTransferMemory> memory);
     Result CheckNativeInputAruid(AppletResourceUserId aruid) const;
     Result GetNativeInputFlag220(Out<bool> out_value, u32 value, AppletResourceUserId aruid);
-    Result NativeInputCommand3111(AppletResourceUserId aruid);
+    Result FinalizeJcms(AppletResourceUserId aruid);
     Result SetNativeInputFlags3112(u32 flags, AppletResourceUserId aruid);
     Result SetNativeInputFlags3113(u32 flags, AppletResourceUserId aruid);
     Result InitializeNmouse(u8 mode, u32 parameter0, u32 parameter1, u32 parameter2,
                             ClientAppletResourceUserId aruid, u64 size,
                             InCopyHandle<Kernel::KTransferMemory> memory);
+    Result InitializeNmouseWithStateRange(u8 mode, u32 width, u32 height, AppletResourceUserId aruid,
+                                          u64 size, InCopyHandle<Kernel::KTransferMemory> memory);
     Result FinalizeNmouse(AppletResourceUserId aruid);
-    Result SetNativeInputParameters(u32 first, u32 second, AppletResourceUserId aruid);
-    Result GetNativeInputState3133(Out<u64> out_state, AppletResourceUserId aruid);
+    Result SetNmousePointerRanges(s32 width, s32 height, AppletResourceUserId aruid);
+    Result GetNmousePointerRanges(Out<s32> out_width, Out<s32> out_height,
+                                  AppletResourceUserId aruid);
     Result SetNativeInputEnabled3135(u8 enabled, AppletResourceUserId aruid);
     Result SetNativeInputValues3140(u32 first, u32 second, AppletResourceUserId aruid, u64 value);
     Result SetNativeInputValues3141(u8 flag, AppletResourceUserId aruid, u64 value);
