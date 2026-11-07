@@ -15,6 +15,7 @@
 #include "video_core/engines/maxwell_dma.h"
 #include "video_core/guest_memory.h"
 #include "video_core/memory_manager.h"
+#include "video_core/nx2.h"
 #include "video_core/renderer_base.h"
 #include "video_core/textures/decoders.h"
 
@@ -203,6 +204,23 @@ void MaxwellDMA::CopyBlockLinearToPitch() {
     copy_info.length_y = regs.line_count;
     auto& accelerate = rasterizer->AccessAccelerateDMA();
     if (accelerate.ImageToBuffer(copy_info, src_operand, dst_operand)) {
+        // The copy left the pixels in a host buffer, and Switch 2 guest reads of it can miss the
+        // buffer cache: Pokemon Pokopia copies each photo (1920x1080 RGBA8) out of its render
+        // target this way and JPEG-encodes it on the CPU, and when the copy was accelerated no
+        // read of the destination reached the cache (none faulted, though every page was cached
+        // and protected), so the photo was saved from stale memory in bands of black and old
+        // rows. The first photo of a session was fine only because its copy took the CPU path
+        // below. Flushing here waits for the GPU once per copy; Pokopia makes none in play.
+        // EDEN_NX2_DMA_READBACK_FLUSH=0 leaves the download to the caches.
+        static const bool flush_readbacks = [] {
+            const char* value = std::getenv("EDEN_NX2_DMA_READBACK_FLUSH");
+            return value == nullptr || value[0] != '0';
+        }();
+        if (flush_readbacks && Tegra::g_nx2_ampere.load(std::memory_order_relaxed)) {
+            memory_manager.FlushRegion(dst_operand.address,
+                                       static_cast<size_t>(dst_operand.pitch) * regs.line_count,
+                                       VideoCommon::CacheType::BufferCache);
+        }
         return;
     }
 
