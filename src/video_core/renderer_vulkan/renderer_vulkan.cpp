@@ -236,6 +236,24 @@ void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebu
     std::vector<Tegra::FramebufferConfig> with_overlay;
     if (Common::GetHostOverlay().Enabled() && !framebuffers.empty()) {
         with_overlay.assign(framebuffers.begin(), framebuffers.end());
+        // Always present (empty when hidden): a change in the layer count rebuilds the layers.
+        const auto guest = Common::GetHostOverlay().GetGuestTexture();
+        Tegra::FramebufferConfig texture{};
+        texture.address = guest.visible ? guest.address : 0;
+        texture.width = guest.width ? guest.width : 1;
+        texture.height = guest.height ? guest.height : 1;
+        texture.stride = texture.width;
+        texture.pixel_format = Service::android::PixelFormat::Rgba8888;
+        texture.blending = Tegra::BlendMode::Opaque;
+        texture.crop_rect = Common::Rectangle<int>(
+            static_cast<int>(guest.crop[0]), static_cast<int>(std::min(guest.crop[1], guest.crop[3])),
+            static_cast<int>(guest.crop[2]), static_cast<int>(std::max(guest.crop[1], guest.crop[3])));
+        if (guest.crop[1] > guest.crop[3]) {
+            texture.transform_flags = Service::android::BufferTransformFlags::FlipV;
+        }
+        texture.dest_rect = std::array<float, 4>{guest.dest[0], guest.dest[1], guest.dest[2],
+                                                 guest.dest[3]};
+        with_overlay.push_back(texture);
         Tegra::FramebufferConfig overlay{};
         overlay.width = Common::HostOverlay::Width;
         overlay.height = Common::HostOverlay::Height;

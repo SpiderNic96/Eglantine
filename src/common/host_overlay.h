@@ -47,7 +47,25 @@ public:
         }
     }
 
+    /// A texture the game itself rendered, shown in a part of the screen under the overlay.
+    struct GuestTexture {
+        bool visible = false;
+        u64 address = 0;            ///< device address of the image (texture cache)
+        u32 width = 0, height = 0;  ///< the image's size in texels
+        float crop[4]{};            ///< texels shown: left, top, right, bottom (top > bottom flips)
+        float dest[4]{};            ///< where on the game's picture, 0..1: left, top, right, bottom
+    };
+    void SetGuestTexture(const GuestTexture& texture) {
+        std::scoped_lock lock{mutex};
+        guest_texture = texture;
+    }
+    GuestTexture GetGuestTexture() {
+        std::scoped_lock lock{mutex};
+        return guest_texture;
+    }
+
 private:
+    GuestTexture guest_texture;
     std::atomic<bool> enabled{false};
     std::mutex mutex;
     std::vector<u8> pixels;

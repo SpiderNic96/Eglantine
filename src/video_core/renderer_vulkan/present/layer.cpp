@@ -93,6 +93,7 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
                           VkSampler sampler, size_t image_index,
                           const Tegra::FramebufferConfig& framebuffer,
                           const Layout::FramebufferLayout& layout) {
+    const bool modded = framebuffer.host_overlay || framebuffer.dest_rect.has_value();
     const auto texture_info =
         framebuffer.host_overlay
             ? std::nullopt
@@ -108,7 +109,7 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
                                             Service::Nvnflinger::LayerStackId::Recording)) == 0;
 
     RefreshResources(device, framebuffer);
-    if (!framebuffer.host_overlay) {
+    if (!modded) {
         SetAntiAliasPass(device);
 #ifdef HAS_RESHADE
         SetPostProcessPass(device, is_applet);
@@ -122,7 +123,7 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
         resource_ticks[image_index] = scheduler.CurrentTick();
     };
 
-    if (!use_accelerated) {
+    if (!use_accelerated && !framebuffer.dest_rect) {
         UpdateRawImage(framebuffer, image_index);
     }
 
@@ -148,7 +149,7 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
         .height = scaled_height,
     };
 
-    if (framebuffer.host_overlay) {
+    if (modded) {
         // drawn as is: no upscaler
     } else if (auto* fsr = std::get_if<FSR>(&sr_filter)) {
         source_image_view = fsr->Draw(device, scheduler, image_index, source_image, source_image_view, render_extent, crop_rect);
@@ -167,6 +168,20 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
 
     SetMatrixData(device, *out_push_constants, layout);
     SetVertexData(device, *out_push_constants, layout, crop_rect);
+    if (framebuffer.dest_rect) {
+        // A part of the screen; nothing at all when the texture cache does not hold the image.
+        const auto& screen = layout.screen;
+        const auto& d = *framebuffer.dest_rect;
+        const f32 w = use_accelerated ? f32(screen.GetWidth()) : 0.f;
+        const f32 h = use_accelerated ? f32(screen.GetHeight()) : 0.f;
+        const f32 x0 = f32(screen.left) + d[0] * w, x1 = f32(screen.left) + d[2] * w;
+        const f32 y0 = f32(screen.top) + d[1] * h, y1 = f32(screen.top) + d[3] * h;
+        auto& v = out_push_constants->vertices;
+        v[0] = ScreenRectVertex(x0, y0, crop_rect.left, crop_rect.top);
+        v[1] = ScreenRectVertex(x1, y0, crop_rect.right, crop_rect.top);
+        v[2] = ScreenRectVertex(x0, y1, crop_rect.left, crop_rect.bottom);
+        v[3] = ScreenRectVertex(x1, y1, crop_rect.right, crop_rect.bottom);
+    }
 
     UpdateDescriptorSet(device, source_image_view, sampler, image_index);
     *out_descriptor_set = descriptor_sets[image_index];

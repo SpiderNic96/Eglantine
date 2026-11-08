@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <array>
 #include <optional>
 #include <span>
 #include <vector>
@@ -44,6 +45,9 @@ struct FramebufferConfig {
     u32 layer_stack_mask{Service::Nvnflinger::DefaultLayerStackMask};
     /// Not guest memory: the emulator's own overlay (common/host_overlay.h), linear RGBA8.
     bool host_overlay{};
+    /// Shown only in this part of the screen (0..1: left, top, right, bottom), without filters,
+    /// and only if the texture cache holds the image (no guest-memory fallback).
+    std::optional<std::array<float, 4>> dest_rect{};
 };
 
 Common::Rectangle<f32> NormalizeCrop(const FramebufferConfig& framebuffer, u32 texture_width,

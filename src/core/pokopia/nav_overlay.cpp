@@ -5,6 +5,9 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <cstdlib>
+#include <mutex>
 #include <chrono>
 #include <cmath>
 #include <optional>
@@ -16,8 +19,14 @@
 #include "common/logging.h"
 #include "core/core.h"
 #include "core/core_timing.h"
+#include "core/hle/kernel/svc.h"
+#include "core/memory.h"
+#include "core/pokopia/hooks.h"
 #include "core/pokopia/mouse_camera.h"
 #include "hid_core/hid_core.h"
+#include "video_core/engines/maxwell_3d.h"
+#include "video_core/gpu.h"
+#include "video_core/memory_manager.h"
 
 namespace Core::Pokopia {
 
@@ -34,6 +43,25 @@ constexpr float ArrowX = 480.f, ArrowY = 44.f;
 constexpr float ArriveRange = 200.f; // world units: the ping is reached
 constexpr float LiftRange = 300.f;   // G this close to the ping lifts it
 constexpr float UnitsPerMetre = 100.f;
+
+// The minimap panel (when the game's map texture is live), overlay pixels.
+constexpr float PanelX0 = 16.f, PanelY0 = 352.f, PanelSize = 172.f;
+constexpr float PanelCells = 26.f; // map cells across the panel
+
+// Pokopia 2.0.1's minimap (main offsets). The pause menu's map is a 1024x1024 render target,
+// "tex_minimap": main+0xf637c0 asks for a redraw when the menu opens; main+0x1047940 redraws it
+// (only if asked and something changed), one sprite per world cell of 800 units.
+constexpr u64 MinimapOwner = 0x3561780;     // global: an object whose +0x1200 is the map system
+constexpr u64 MinimapSystem = 0x1200;
+constexpr u64 MinimapFields = 0x63bd0;      // in the map system: texture, atlas, ...
+constexpr u64 MinimapDirty = 0x20;          // u8: something changed since the last redraw
+constexpr u64 MinimapRequest = 0x21;        // u8: redraw (if dirty); cleared by the redraw
+constexpr u64 MinimapRenderSite = 0x1047c20; // str w8, [sp, #0x64]: w21/w27 first cell, w19 extent
+constexpr u64 TextureNvnOffset = 0x58;      // texture object -> its NVNtexture
+constexpr float CellUnits = 800.f;
+constexpr float CellOrigin = 102400.f;      // world -102400 is cell 0
+constexpr u32 TextureSize = 1024;
+constexpr u32 RequestEveryTicks = 15;       // ask for a redraw 4 times a second
 
 struct Color {
     float r, g, b, a; // 0..1, straight alpha
@@ -111,6 +139,20 @@ public:
         p[1] = static_cast<u8>(std::lround(c.g * 255.f * a + p[1] * k));
         p[2] = static_cast<u8>(std::lround(c.b * 255.f * a + p[2] * k));
         p[3] = static_cast<u8>(std::lround(255.f * a + p[3] * k));
+    }
+
+    void Rect(float x0, float y0, float x1, float y1, Color color) {
+        Shape(x0 - 1, y0 - 1, x1 + 1, y1 + 1, color, [&](float x, float y) {
+            return std::min({x - x0, x1 - x, y - y0, y1 - y});
+        });
+    }
+
+    /// A rectangle's outline, `width` wide, inside the rectangle.
+    void Frame(float x0, float y0, float x1, float y1, float width, Color color) {
+        Shape(x0 - 1, y0 - 1, x1 + 1, y1 + 1, color, [&](float x, float y) {
+            const float inside = std::min({x - x0, x1 - x, y - y0, y1 - y});
+            return std::min(inside, width - inside);
+        });
     }
 
     void Disc(Vec c, float r, Color color) {
@@ -213,7 +255,118 @@ std::string Distance(float units) {
 }
 
 Core::System* g_system = nullptr;
+u64 g_main_base = 0;
 std::shared_ptr<Core::Timing::EventType> g_tick_event;
+
+// What the game's last minimap redraw covered (written by the hook, on a CPU core's thread).
+struct MapInfo {
+    bool drawn = false;
+    s32 first_x = 0, first_y = 0; // the texture's first cell
+    u32 cell_px = 16;             // texels per cell
+    u64 fields = 0;               // the map system's MinimapFields
+    u64 address = 0;              // the texture's device address, once found
+    bool searched = false;
+};
+std::mutex g_map_mutex;
+MapInfo g_map;
+
+bool Valid(Core::Memory::Memory& memory, u64 address, u64 size = 8) {
+    return address != 0 && memory.IsValidVirtualAddressRange(address, size);
+}
+
+/// The texture's GPU address is somewhere in its NVNtexture (whose layout is the driver's): take
+/// the first value there that maps a whole 1024x1024 RGBA8 image in the GPU's address space.
+void FindTexture(Core::System& system, u64 fields) {
+    auto& memory = system.ApplicationMemory();
+    g_map.searched = true;
+    if (!Valid(memory, fields)) {
+        return;
+    }
+    const u64 texture = memory.Read64(fields);
+    if (!Valid(memory, texture + TextureNvnOffset)) {
+        return;
+    }
+    const u64 nvn = memory.Read64(texture + TextureNvnOffset);
+    static const int pick = [] {
+        const char* v = std::getenv("EDEN_POKOPIA_MAP_PICK");
+        return v != nullptr ? std::atoi(v) : 0;
+    }();
+    int found = 0;
+    auto& gpu_memory = system.GPU().Maxwell3D().GetMemoryManager();
+    for (const auto& [base, what] : {std::pair{nvn, "nvn"}, std::pair{texture, "texture"}}) {
+        if (!Valid(memory, base, 0x100)) {
+            continue;
+        }
+        for (u64 offset = 0; offset < 0x100; offset += 8) {
+            const u64 value = memory.Read64(base + offset);
+            if (value == 0 || (value & 0xFFF) != 0 || value >= (u64{1} << 40)) {
+                continue;
+            }
+            const auto device =
+                gpu_memory.GpuToCpuAddress(value, std::size_t{TextureSize} * TextureSize * 4);
+            if (!device) {
+                continue;
+            }
+            LOG_INFO(Loader, "Pokopia minimap: candidate {} {} {}+{:#x}: gpu {:#x} -> device {:#x}",
+                     found, what, base, offset, value, *device);
+            if (found++ == pick) {
+                g_map.address = *device;
+            }
+        }
+    }
+    if (g_map.address == 0) {
+        LOG_WARNING(Loader, "Pokopia minimap: texture {:#x} (nvn {:#x}) has no GPU address I know",
+                    texture, nvn);
+    } else {
+        LOG_INFO(Loader, "Pokopia minimap: texture at device {:#x}", g_map.address);
+    }
+}
+
+void OnMinimapRender(Core::System& system, Kernel::Svc::ThreadContext& ctx) {
+    std::scoped_lock lock{g_map_mutex};
+    const s32 first_x = static_cast<s32>(ctx.r[21]);
+    const s32 first_y = static_cast<s32>(ctx.r[27]);
+    const u32 cell_px = static_cast<s32>(ctx.r[19]) < 64 ? 16 : 8;
+    if (!g_map.drawn || first_x != g_map.first_x || first_y != g_map.first_y ||
+        cell_px != g_map.cell_px) {
+        LOG_INFO(Loader, "Pokopia minimap: redrawn, first cell {} {}, {} texels a cell", first_x,
+                 first_y, cell_px);
+    }
+    g_map.first_x = first_x;
+    g_map.first_y = first_y;
+    g_map.cell_px = cell_px;
+    g_map.fields = ctx.r[24];
+    g_map.drawn = true;
+    if (!g_map.searched) {
+        FindTexture(system, g_map.fields);
+    }
+}
+
+/// Asks the game to redraw its minimap (it does only if something changed); the first time also
+/// marks it changed, for the first picture.
+void RequestRedraw(Core::System& system, bool first) {
+    auto& memory = system.ApplicationMemory();
+    if (!Valid(memory, g_main_base + MinimapOwner)) {
+        return;
+    }
+    const u64 owner = memory.Read64(g_main_base + MinimapOwner);
+    if (!Valid(memory, owner + MinimapSystem)) {
+        return;
+    }
+    const u64 system_object = memory.Read64(owner + MinimapSystem);
+    const u64 fields = system_object + MinimapFields;
+    if (system_object == 0 || !Valid(memory, fields, 0x28)) {
+        return;
+    }
+    if (memory.Read64(fields) == 0 || memory.Read64(fields + 8) == 0) {
+        return; // no texture yet
+    }
+    if (first) {
+        LOG_INFO(Loader, "Pokopia minimap: map fields at {:#x}, asking for redraws", fields);
+        memory.Write8(fields + MinimapDirty, 1);
+    }
+    memory.Write8(fields + MinimapRequest, 1);
+}
 
 struct State {
     Canvas canvas;
@@ -222,6 +375,7 @@ struct State {
     float ping_x = 0.f, ping_y = 0.f, ping_z = 0.f;
     u64 last_signature = ~u64{0};
     u32 frame = 0;
+    bool requested_once = false;
 };
 
 State& St() {
@@ -229,29 +383,74 @@ State& St() {
     return state;
 }
 
-void Draw(State& s, const CameraInfo& cam, Vec forward) {
+/// Where the map panel shows the world: texel crop and a world -> panel mapping.
+struct PanelView {
+    bool live = false;
+    float crop_x = 0.f, crop_y = 0.f, crop_size = 1.f; // texels
+    s32 first_x = 0, first_y = 0;
+    float cell_px = 16.f;
+    Vec ToPanel(float x, float z) const {
+        const float tx = ((x + CellOrigin) / CellUnits - first_x) * cell_px;
+        const float ty = ((z + CellOrigin) / CellUnits - first_y) * cell_px;
+        return {PanelX0 + (tx - crop_x) / crop_size * PanelSize,
+                PanelY0 + (ty - crop_y) / crop_size * PanelSize};
+    }
+};
+
+void DrawPing(Canvas& c, Vec at, Vec centre, float limit_x0, float limit_y0, float limit_x1,
+              float limit_y1) {
+    if (at.x >= limit_x0 && at.x <= limit_x1 && at.y >= limit_y0 && at.y <= limit_y1) {
+        c.Disc(at, 6.5f, Dark);
+        c.Disc(at, 5.f, Ping);
+        return;
+    }
+    // Off the panel: a pointer on its edge, towards the ping.
+    Vec dir = at - centre;
+    dir = dir * (1.f / std::max(Length(dir), 1e-4f));
+    const float tx = dir.x > 0 ? (limit_x1 - centre.x) / dir.x
+                               : dir.x < 0 ? (limit_x0 - centre.x) / dir.x : 1e9f;
+    const float ty = dir.y > 0 ? (limit_y1 - centre.y) / dir.y
+                               : dir.y < 0 ? (limit_y0 - centre.y) / dir.y : 1e9f;
+    Pointer(c, centre + dir * std::min(tx, ty), dir, 13.f, 5.f, Ping);
+}
+
+void Draw(State& s, const CameraInfo& cam, Vec forward, const PanelView& view) {
     Canvas& c = s.canvas;
     c.Clear();
     const Vec player{cam.target[0], cam.target[2]};
-    const Vec centre{RadarX, RadarY};
 
-    // Radar, north up as the game's map: world +x right, +z down.
-    c.Disc(centre, RadarR, Shade);
-    c.Ring(centre, RadarR * 0.5f, 1.f, Color{1.f, 1.f, 1.f, 0.25f});
-    c.Ring(centre, RadarR, 2.f, White);
-    c.Text("N", RadarX, RadarY - RadarR + 5.f, 2, White);
-    if (s.ping) {
-        const Vec rel = (Vec{s.ping_x, s.ping_z} - player) * (RadarR / RadarRange);
-        const float len = Length(rel);
-        if (len > RadarR - 8.f) {
-            const Vec dir = rel * (1.f / len);
-            Pointer(c, centre + dir * (RadarR - 8.f), dir, 13.f, 5.f, Ping);
-        } else {
-            c.Disc(centre + rel, 6.5f, Dark);
-            c.Disc(centre + rel, 5.f, Ping);
+    if (view.live) {
+        // The game's map is under this (a layer of its own): a frame, north, the player, the ping.
+        const float x1 = PanelX0 + PanelSize, y1 = PanelY0 + PanelSize;
+        c.Frame(PanelX0 - 3.f, PanelY0 - 3.f, x1 + 3.f, y1 + 3.f, 3.f, White);
+        c.Frame(PanelX0 - 5.f, PanelY0 - 5.f, x1 + 5.f, y1 + 5.f, 2.f, Dark);
+        c.Text("N", PanelX0 + PanelSize * 0.5f, PanelY0 + 4.f, 2, White);
+        const Vec at = view.ToPanel(player.x, player.y);
+        if (s.ping) {
+            DrawPing(c, view.ToPanel(s.ping_x, s.ping_z), at, PanelX0 + 6.f, PanelY0 + 6.f,
+                     x1 - 6.f, y1 - 6.f);
         }
+        Pointer(c, at, forward, 18.f, 7.f, Player);
+    } else {
+        // Radar, north up as the game's map: world +x right, +z down.
+        const Vec centre{RadarX, RadarY};
+        c.Disc(centre, RadarR, Shade);
+        c.Ring(centre, RadarR * 0.5f, 1.f, Color{1.f, 1.f, 1.f, 0.25f});
+        c.Ring(centre, RadarR, 2.f, White);
+        c.Text("N", RadarX, RadarY - RadarR + 5.f, 2, White);
+        if (s.ping) {
+            const Vec rel = (Vec{s.ping_x, s.ping_z} - player) * (RadarR / RadarRange);
+            const float len = Length(rel);
+            if (len > RadarR - 8.f) {
+                const Vec dir = rel * (1.f / len);
+                Pointer(c, centre + dir * (RadarR - 8.f), dir, 13.f, 5.f, Ping);
+            } else {
+                c.Disc(centre + rel, 6.5f, Dark);
+                c.Disc(centre + rel, 5.f, Ping);
+            }
+        }
+        Pointer(c, centre, forward, 18.f, 7.f, Player);
     }
-    Pointer(c, centre, forward, 18.f, 7.f, Player);
 
     if (!s.ping) {
         return;
@@ -274,6 +473,58 @@ void Draw(State& s, const CameraInfo& cam, Vec forward) {
     screen = screen * (1.f / std::max(Length(screen), 1e-4f));
     Pointer(c, arrow, screen, 34.f, 13.f, Ping);
     c.Text(Distance(dist), ArrowX, ArrowY + 26.f, 2, White);
+}
+
+PanelView MapView(const CameraInfo& cam) {
+    PanelView view{};
+    MapInfo map;
+    {
+        std::scoped_lock lock{g_map_mutex};
+        map = g_map;
+    }
+    if (!map.drawn || map.address == 0) {
+        return view;
+    }
+    view.live = true;
+    view.first_x = map.first_x;
+    view.first_y = map.first_y;
+    view.cell_px = static_cast<float>(map.cell_px);
+    view.crop_size = std::min(PanelCells * view.cell_px, static_cast<float>(TextureSize));
+    const float tx = ((cam.target[0] + CellOrigin) / CellUnits - map.first_x) * view.cell_px;
+    const float ty = ((cam.target[2] + CellOrigin) / CellUnits - map.first_y) * view.cell_px;
+    const float max = static_cast<float>(TextureSize) - view.crop_size;
+    view.crop_x = std::round(std::clamp(tx - view.crop_size * 0.5f, 0.f, max));
+    view.crop_y = std::round(std::clamp(ty - view.crop_size * 0.5f, 0.f, max));
+
+    static const bool flip = [] {
+        const char* v = std::getenv("EDEN_POKOPIA_MAP_FLIP");
+        return v != nullptr && v[0] == '1';
+    }();
+    Common::HostOverlay::GuestTexture texture{};
+    texture.visible = true;
+    texture.address = map.address;
+    texture.width = TextureSize;
+    texture.height = TextureSize;
+    texture.crop[0] = view.crop_x;
+    texture.crop[1] = flip ? view.crop_y + view.crop_size : view.crop_y;
+    texture.crop[2] = view.crop_x + view.crop_size;
+    texture.crop[3] = flip ? view.crop_y : view.crop_y + view.crop_size;
+    texture.dest[0] = PanelX0 / W;
+    texture.dest[1] = PanelY0 / H;
+    texture.dest[2] = (PanelX0 + PanelSize) / W;
+    texture.dest[3] = (PanelY0 + PanelSize) / H;
+    Common::GetHostOverlay().SetGuestTexture(texture);
+    return view;
+}
+
+void Hide(State& s) {
+    Common::GetHostOverlay().SetGuestTexture({});
+    if (s.shown) {
+        s.canvas.Clear();
+        Common::GetHostOverlay().Publish(s.canvas.px);
+        s.shown = false;
+        s.last_signature = ~u64{0};
+    }
 }
 
 void Tick() {
@@ -301,47 +552,61 @@ void Tick() {
     }
 
     if (!have_camera || !hid.IsInPlay()) {
-        if (s.shown) {
-            s.canvas.Clear();
-            overlay.Publish(s.canvas.px);
-            s.shown = false;
-            s.last_signature = ~u64{0};
-        }
+        Hide(s);
         return;
     }
     if (!overlay.Enabled()) {
         overlay.SetEnabled(true);
     }
+    if (s.frame % RequestEveryTicks == 0) {
+        RequestRedraw(*g_system, !s.requested_once);
+        s.requested_once = true;
+    }
 
     Vec forward{cam.target[0] - cam.eye[0], cam.target[2] - cam.eye[2]};
     const float flen = Length(forward);
     forward = flen > 1e-3f ? forward * (1.f / flen) : Vec{std::sin(cam.yaw), std::cos(cam.yaw)};
+    const PanelView view = MapView(cam);
 
     // Redraw only when something on it moved (the arrival pulse always moves).
     const auto q = [](float v, float step) { return static_cast<u64>(static_cast<s64>(v / step)); };
     u64 signature = q(cam.target[0], 8.f) * 1000003ULL ^ q(cam.target[2], 8.f) * 998244353ULL ^
                     q(std::atan2(forward.y, forward.x), 0.01f) * 7919ULL ^
-                    (s.ping ? q(s.ping_x, 1.f) * 31ULL ^ q(s.ping_z, 1.f) * 131ULL ^ 1ULL : 0ULL);
+                    (s.ping ? q(s.ping_x, 1.f) * 31ULL ^ q(s.ping_z, 1.f) * 131ULL ^ 1ULL : 0ULL) ^
+                    (view.live ? q(view.crop_x, 1.f) * 65537ULL ^ q(view.crop_y, 1.f) * 257ULL ^ 2ULL
+                               : 0ULL);
     const bool arrived = s.ping && std::hypot(s.ping_x - cam.target[0],
                                               s.ping_z - cam.target[2]) < ArriveRange;
     if (signature == s.last_signature && !arrived && s.shown) {
         return;
     }
     s.last_signature = signature;
-    Draw(s, cam, forward);
+    Draw(s, cam, forward, view);
     overlay.Publish(s.canvas.px);
     s.shown = true;
 }
 
 } // namespace
 
-void InstallNavOverlay(Core::System& system) {
+void InstallNavOverlay(Core::System& system, HookInstaller& hooks, u64 main_base) {
     g_system = &system;
-    St().shown = false;
-    St().ping = false;
-    St().last_signature = ~u64{0};
-    St().canvas.Clear();
-    Common::GetHostOverlay().Publish(St().canvas.px);
+    g_main_base = main_base;
+    {
+        std::scoped_lock lock{g_map_mutex};
+        g_map = MapInfo{};
+    }
+    State& s = St();
+    s.shown = false;
+    s.ping = false;
+    s.requested_once = false;
+    s.last_signature = ~u64{0};
+    s.canvas.Clear();
+    Common::GetHostOverlay().Publish(s.canvas.px);
+    Common::GetHostOverlay().SetGuestTexture({});
+
+    if (!hooks.AddInline(MinimapRenderSite, &OnMinimapRender, "minimap redraw")) {
+        LOG_WARNING(Loader, "Pokopia navigation overlay: no live map (radar only)");
+    }
 
     auto& timing = system.CoreTiming();
     if (g_tick_event) {

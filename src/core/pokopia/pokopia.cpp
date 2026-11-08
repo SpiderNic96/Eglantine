@@ -58,7 +58,7 @@ void Install(Core::System& system, std::span<u8> image, u64 load_base, u64 progr
     if (Off("EDEN_POKOPIA_MOUSE_CAMERA") || Off("EDEN_POKOPIA_NAV")) {
         LOG_INFO(Loader, "Pokopia navigation overlay: off");
     } else {
-        InstallNavOverlay(system);
+        InstallNavOverlay(system, hooks, load_base);
     }
 }
 
