@@ -386,6 +386,72 @@ void PlaceMarker(Canvas& c, Vec p, Color color) {
     c.RoundRect(p.x - 4.3f, p.y - 4.3f, p.x + 4.3f, p.y + 4.3f, 2.2f, color);
 }
 
+// Facilities by the menu's icon id (seen: 0x14c the way to another area, 0x14f a PC, 0x150 a
+// lit building; 0x14d and 0x14e the house and the Pokémon Center).
+enum class Place : u8 { Generic, Exit, Pc, Light, Center, House };
+
+Place PlaceOf(u16 id) {
+    switch (id) {
+    case 0x14c: return Place::Exit;
+    case 0x14d: return Place::Center;
+    case 0x14e: return Place::House;
+    case 0x14f: return Place::Pc;
+    case 0x150: return Place::Light;
+    default: return Place::Generic;
+    }
+}
+
+/// A facility drawn like the game's map icons: a white-rimmed badge with a simple picture.
+void FacilityMarker(Canvas& c, Vec p, Place place, Color fallback) {
+    constexpr Color Ink{0.22f, 0.22f, 0.26f, 1.f};
+    constexpr Color Green{0.30f, 0.72f, 0.45f, 1.f};
+    constexpr Color Screen{0.85f, 0.97f, 0.90f, 1.f};
+    const auto badge = [&](Color fill) {
+        c.RoundRect(p.x - 8.f, p.y - 6.5f, p.x + 8.f, p.y + 8.5f, 4.f, Color{0.f, 0.f, 0.f, 0.3f});
+        c.RoundRect(p.x - 8.f, p.y - 8.f, p.x + 8.f, p.y + 8.f, 4.f, White);
+        c.RoundRect(p.x - 6.5f, p.y - 6.5f, p.x + 6.5f, p.y + 6.5f, 3.f, fill);
+    };
+    switch (place) {
+    case Place::Exit: // two white chevrons on green
+        badge(Green);
+        for (const float dx : {-3.5f, 1.5f}) {
+            c.Triangle(Vec{p.x + dx - 1.5f, p.y}, Vec{p.x + dx + 3.f, p.y - 4.f},
+                       Vec{p.x + dx + 3.f, p.y + 4.f}, White);
+        }
+        break;
+    case Place::Pc: // a green monitor with a pale screen
+        badge(Green);
+        c.RoundRect(p.x - 4.5f, p.y - 4.f, p.x + 4.5f, p.y + 2.5f, 1.2f, Screen);
+        c.Rect(p.x - 2.5f, p.y + 3.2f, p.x + 2.5f, p.y + 4.6f, White);
+        c.Disc(Vec{p.x, p.y - 0.8f}, 1.4f, Green);
+        break;
+    case Place::Light: // a warm lamp
+        badge(Ink);
+        c.Disc(Vec{p.x, p.y - 0.5f}, 3.6f, Color{1.f, 0.82f, 0.25f, 1.f});
+        c.Disc(Vec{p.x, p.y - 1.f}, 1.6f, Color{1.f, 0.97f, 0.75f, 1.f});
+        c.Rect(p.x - 2.f, p.y + 3.3f, p.x + 2.f, p.y + 5.f, Color{0.75f, 0.75f, 0.8f, 1.f});
+        break;
+    case Place::Center: // red roof over a Poké Ball door
+        badge(Color{0.98f, 0.96f, 0.94f, 1.f});
+        c.Triangle(Vec{p.x, p.y - 6.f}, Vec{p.x - 6.f, p.y - 0.5f}, Vec{p.x + 6.f, p.y - 0.5f},
+                   PlayerRed);
+        c.Rect(p.x - 4.5f, p.y - 0.5f, p.x + 4.5f, p.y + 5.f, Color{0.9f, 0.9f, 0.92f, 1.f});
+        c.Disc(Vec{p.x, p.y + 2.f}, 2.2f, PlayerRed);
+        c.Rect(p.x - 2.2f, p.y + 1.7f, p.x + 2.2f, p.y + 2.3f, Ink);
+        break;
+    case Place::House: // a pink house
+        badge(Color{0.98f, 0.96f, 0.94f, 1.f});
+        c.Triangle(Vec{p.x, p.y - 6.f}, Vec{p.x - 6.f, p.y - 0.5f}, Vec{p.x + 6.f, p.y - 0.5f},
+                   Color{0.95f, 0.45f, 0.65f, 1.f});
+        c.Rect(p.x - 4.f, p.y - 0.5f, p.x + 4.f, p.y + 5.f, Color{0.98f, 0.75f, 0.85f, 1.f});
+        c.Rect(p.x - 1.3f, p.y + 1.5f, p.x + 1.3f, p.y + 5.f, Color{0.45f, 0.30f, 0.45f, 1.f});
+        break;
+    case Place::Generic:
+        PlaceMarker(c, p, fallback);
+        break;
+    }
+}
+
 std::string Distance(float units) {
     const float metres = units / UnitsPerMetre;
     if (metres >= 1000.f) {
@@ -556,6 +622,14 @@ constexpr std::array<u64, 2> PokemonComponentSites{0xf65790, 0xf65a50};
 // The area's list of Pokémon ids the menu goes through: [[main+0x3483bd0]] +0x2b8 (u16 ids),
 // count +0x2c4.
 constexpr u64 PokemonListGlobal = 0x3483bd0;
+// A Pokémon's object (an id 0x2nnn): [list + 0x50 + nnn * 8], of this class. Its position is in
+// the world's table of transforms: [[main+0x3483b60]] + 0x835af0 + slot * 0x30 + 0x10, slot the
+// object's u32 at +0x382c (below 0x41a); main+0x666b68, the class's position getter.
+constexpr u64 PokemonVtable = 0x322f7f8;
+constexpr u64 WorldGlobal = 0x3483b60;
+constexpr u64 TransformTable = 0x835af0;
+constexpr u64 TransformSlot = 0x382c;
+constexpr u32 TransformSlots = 0x41a;
 constexpr std::array<Color, IconSites.size()> IconColors{{
     {0.90f, 0.20f, 0.20f, 1.f}, // red
     {0.20f, 0.45f, 0.95f, 1.f}, // blue
@@ -686,20 +760,49 @@ void ClearIcons() {
 }
 
 struct MapMarks {
-    std::vector<std::pair<Vec, Color>> places; // world x, z; colour
+    struct Mark {
+        Vec where; // world x, z
+        Place place;
+        Color color;
+    };
+    std::vector<Mark> places;
     std::vector<Vec> pokemon;
 };
 
+u64 ReadGlobal(Core::Memory::Memory& memory, u64 got) {
+    if (!Valid(memory, g_main_base + got)) {
+        return 0;
+    }
+    const u64 global = memory.Read64(g_main_base + got);
+    return Valid(memory, global) ? memory.Read64(global) : 0;
+}
+
+/// Where a Pokémon is, straight from the game's tables (no menu needed), if `id` is one.
+std::optional<Vec> PokemonPosition(Core::Memory::Memory& memory, u64 list, u64 world, u16 id) {
+    if ((id >> 12) != 2 || (id & 0xFFF) >= 64) {
+        return std::nullopt;
+    }
+    const u64 slot_address = list + 0x50 + static_cast<u64>(id & 0xFFF) * 8;
+    if (!Valid(memory, slot_address)) {
+        return std::nullopt;
+    }
+    const u64 object = memory.Read64(slot_address);
+    if (!Valid(memory, object + TransformSlot, 4) ||
+        memory.Read64(object) != g_main_base + PokemonVtable) {
+        return std::nullopt;
+    }
+    const u32 slot = memory.Read32(object + TransformSlot);
+    const u64 position = world + TransformTable + static_cast<u64>(slot) * 0x30 + 0x10;
+    if (slot >= TransformSlots || !Valid(memory, position, 12)) {
+        return std::nullopt;
+    }
+    return Vec{std::bit_cast<float>(memory.Read32(position)),
+               std::bit_cast<float>(memory.Read32(position + 8))};
+}
+
 /// The ids in the area's Pokémon list, or nullopt if it cannot be read.
 std::optional<std::vector<u16>> PokemonInArea(Core::Memory::Memory& memory) {
-    if (!Valid(memory, g_main_base + PokemonListGlobal)) {
-        return std::nullopt;
-    }
-    const u64 global = memory.Read64(g_main_base + PokemonListGlobal);
-    if (!Valid(memory, global)) {
-        return std::nullopt;
-    }
-    const u64 list = memory.Read64(global);
+    const u64 list = ReadGlobal(memory, PokemonListGlobal);
     if (!Valid(memory, list + 0x2b8, 0x10)) {
         return std::nullopt;
     }
@@ -734,17 +837,33 @@ MapMarks CollectMarks(Core::System& system) {
     for (const Icon& icon : g_icons) {
         const Color color = icon.id != 0xFFFF ? FacilityColors[icon.id % FacilityColors.size()]
                                               : IconColors[icon.kind];
-        marks.places.push_back({Vec{icon.x, icon.z}, color});
+        marks.places.push_back({Vec{icon.x, icon.z}, PlaceOf(icon.id), color});
     }
+    const auto plausible = [](Vec p) {
+        return std::isfinite(p.x) && std::isfinite(p.y) && std::abs(p.x) < CellOrigin &&
+               std::abs(p.y) < CellOrigin;
+    };
+    // Every Pokémon in the area, live, from the game's own tables.
+    std::vector<u16> found;
+    if (in_area) {
+        const u64 list = ReadGlobal(memory, PokemonListGlobal);
+        const u64 world = ReadGlobal(memory, WorldGlobal);
+        for (const u16 id : *in_area) {
+            if (const auto p = PokemonPosition(memory, list, world, id); p && plausible(*p)) {
+                marks.pokemon.push_back(*p);
+                found.push_back(id);
+            }
+        }
+    }
+    // Others the menu showed (a kind of Pokémon those tables do not cover).
     for (const auto& [id, tracked] : g_pokemon) {
-        if (!Valid(memory, tracked.position, 12)) {
+        if (std::ranges::find(found, id) != found.end() || !Valid(memory, tracked.position, 12)) {
             continue;
         }
-        const float x = std::bit_cast<float>(memory.Read32(tracked.position));
-        const float z = std::bit_cast<float>(memory.Read32(tracked.position + 8));
-        if (std::isfinite(x) && std::isfinite(z) && std::abs(x) < CellOrigin &&
-            std::abs(z) < CellOrigin) {
-            marks.pokemon.push_back(Vec{x, z});
+        const Vec p{std::bit_cast<float>(memory.Read32(tracked.position)),
+                    std::bit_cast<float>(memory.Read32(tracked.position + 8))};
+        if (plausible(p)) {
+            marks.pokemon.push_back(p);
         }
     }
     return marks;
@@ -823,10 +942,10 @@ void Draw(State& s, const CameraInfo& cam, Vec forward, const PanelView& view,
         const auto inside = [x1, y1](Vec p) {
             return p.x > PanelX0 + 2.f && p.x < x1 - 2.f && p.y > PanelY0 + 2.f && p.y < y1 - 2.f;
         };
-        for (const auto& [where, color] : marks.places) {
-            const Vec p = view.ToPanel(where.x, where.y);
+        for (const auto& mark : marks.places) {
+            const Vec p = view.ToPanel(mark.where.x, mark.where.y);
             if (inside(p) && Length(p - at) > 4.f) {
-                PlaceMarker(c, p, color);
+                FacilityMarker(c, p, mark.place, mark.color);
             }
         }
         for (const Vec& where : marks.pokemon) {
