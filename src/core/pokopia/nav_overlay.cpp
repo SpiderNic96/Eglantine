@@ -632,8 +632,11 @@ bool PingFromMenuMap(float u, float v) {
     if (!map.drawn || map.extent <= 0 || u < 0.f || u > 1.f || v < 0.f || v > 1.f) {
         return false;
     }
-    // The menu shows the area: extent cells around the texture's centre.
-    const float span = static_cast<float>(map.extent) * static_cast<float>(map.cell_px);
+    // The menu shows the area around the texture's centre: its extent in cells, plus a margin
+    // (main+0xf63b40 sets the map's UVs: 0.5 -+ extent * 800 * 1.0535 / 2 / the texture's world size).
+    constexpr float MenuMargin = 1.0534979f;
+    const float span =
+        static_cast<float>(map.extent) * MenuMargin * static_cast<float>(map.cell_px);
     const float tx = TextureSize * 0.5f + (u - 0.5f) * span;
     const float ty = TextureSize * 0.5f + (v - 0.5f) * span;
     State& s = St();
