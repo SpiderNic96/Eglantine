@@ -18,4 +18,12 @@ class HookInstaller;
 /// angle per pixel, instead of through an emulated right stick.
 bool InstallMouseCamera(Core::System& system, HookInstaller& hooks, u64 main_base);
 
+struct CameraInfo {
+    float target[3]; // what the follow camera looks at: about the player
+    float eye[3];
+    float yaw, pitch; // radians
+};
+/// The follow camera last seen by the hook (false before the first turn step).
+bool CameraState(Core::System& system, CameraInfo* out);
+
 } // namespace Core::Pokopia

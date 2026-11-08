@@ -28,6 +28,7 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -41,6 +42,7 @@
 #include "core/hle/kernel/svc.h"
 #include "core/memory.h"
 #include "core/pokopia/hooks.h"
+#include "core/pokopia/mouse_camera.h"
 #include "hid_core/frontend/emulated_devices.h"
 #include "hid_core/hid_core.h"
 #include "hid_core/hid_types.h"
@@ -822,6 +824,63 @@ bool KeyGuideDrawn(bool camera_live) {
     return false;
 }
 
+// ---- diagnostics: EDEN_POKOPIA_MENU_LOG=1 ----
+// While a menu is up, each time its set of layouts changes (and at most every 2 s while it stays
+// up): the player's position and heading from the follow camera, then every drawn layout and its
+// visible panes with their names and rectangles (1920x1080 canvas, y down). For finding UI parts
+// (the menu's minimap) and how they relate to the world.
+void LogMenu() {
+    static const bool enabled = [] {
+        const char* v = std::getenv("EDEN_POKOPIA_MENU_LOG");
+        return v != nullptr && v[0] != '0';
+    }();
+    if (!enabled) {
+        return;
+    }
+    static u64 last_sig = 0;
+    static auto last_time = std::chrono::steady_clock::time_point{};
+    static int dumps = 0;
+    const State& s = St();
+    u64 sig = 0;
+    for (const Layout& l : s.layouts) {
+        sig = sig * 1000003ULL + (static_cast<u64>(l.id) << 32 | l.sub) + 1;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (dumps >= 40 || (sig == last_sig && now - last_time < std::chrono::seconds(2))) {
+        return;
+    }
+    last_sig = sig;
+    last_time = now;
+    ++dumps;
+    CameraInfo cam{};
+    if (CameraState(*g_system, &cam)) {
+        LOG_INFO(Loader,
+                 "menu dump {}: player (camera target) {:.2f} {:.2f} {:.2f}, eye {:.2f} {:.2f} "
+                 "{:.2f}, yaw {:.4f}, pitch {:.4f}",
+                 dumps, cam.target[0], cam.target[1], cam.target[2], cam.eye[0], cam.eye[1],
+                 cam.eye[2], cam.yaw, cam.pitch);
+    } else {
+        LOG_INFO(Loader, "menu dump {}: no camera yet", dumps);
+    }
+    for (std::size_t li = 0; li < s.layouts.size(); ++li) {
+        const Layout& l = s.layouts[li];
+        if (l.visible == 0) {
+            continue;
+        }
+        LOG_INFO(Loader, "menu dump {}: layout {}/{} ({} visible panes)", dumps, l.id, l.sub,
+                 l.visible);
+        int shown = 0;
+        for (const Pane& p : s.panes) {
+            if (p.lay != static_cast<int>(li) || ++shown > 120) {
+                continue;
+            }
+            LOG_INFO(Loader, "menu dump {}:   '{}'{}{} rect {:.1f},{:.1f}..{:.1f},{:.1f} a={} f={:x}",
+                     dumps, p.name, p.item ? " [entry]" : "", p.cursor ? " [cursor]" : "", p.x0,
+                     p.y0, p.x1, p.y1, p.alpha, p.flags);
+        }
+    }
+}
+
 // ---- input ----
 
 void QueueTap(u64 button) {
@@ -1017,6 +1076,7 @@ void Tick() {
         Scan();
     }
     Pick(px, py, inside);
+    LogMenu();
     if (right_click) {
         s.steering = false;
         QueueTap(static_cast<u64>(Button::B));

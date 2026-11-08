@@ -14,6 +14,7 @@
 #include "core/pokopia/hooks.h"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cstdlib>
@@ -58,6 +59,7 @@ constexpr double RadiansPerPixel = 0.000767945;
 constexpr s64 GraceNs = 250'000'000;
 
 u64 g_main_base{};
+std::atomic<u64> g_last_cam{0}; // the follow camera seen by the last turn step
 s64 g_last_turn_ns{};
 
 s64 NowNs() {
@@ -113,6 +115,7 @@ void OnCameraTurn(Core::System& system, Kernel::Svc::ThreadContext& ctx) {
     }
     auto& memory = system.ApplicationMemory();
     const u64 cam = ctx.r[19];
+    g_last_cam.store(cam, std::memory_order_relaxed);
     if (!memory.IsValidVirtualAddressRange(cam, CamIdle + 4)) {
         return;
     }
@@ -146,8 +149,25 @@ void OnFollowGate(Core::System&, Kernel::Svc::ThreadContext& ctx) {
 
 } // namespace
 
+bool CameraState(Core::System& system, CameraInfo* out) {
+    const u64 cam = g_last_cam.load(std::memory_order_relaxed);
+    auto& memory = system.ApplicationMemory();
+    if (cam == 0 || !memory.IsValidVirtualAddressRange(cam, CamIdle + 4)) {
+        return false;
+    }
+    // Recompia: the view write copies the eye (+0x60) and the target (+0x50) into the view block.
+    for (int i = 0; i < 3; ++i) {
+        out->target[i] = ReadF32(memory, cam + 0x50 + 4 * i);
+        out->eye[i] = ReadF32(memory, cam + 0x60 + 4 * i);
+    }
+    out->yaw = ReadF32(memory, cam + CamYaw);
+    out->pitch = ReadF32(memory, cam + CamPitch);
+    return true;
+}
+
 bool InstallMouseCamera(Core::System& system, HookInstaller& hooks, u64 main_base) {
     g_main_base = main_base;
+    g_last_cam = 0;
     g_last_turn_ns = 0;
     if (!hooks.Add(TurnSite, &OnCameraTurn, "mouse camera")) {
         return false;
