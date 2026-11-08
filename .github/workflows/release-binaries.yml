@@ -694,7 +694,22 @@ jobs:
           # Asset names drop the commit sha: the release tag already identifies the build.
           strip_sha() { sed "s/-${GITHUB_SHA}//" <<< "$1"; }
           shopt -s nullglob
-          downloaded=(artifacts/*/)
+          downloaded=(artifacts/eglantine-*/)
+          if [ ${#downloaded[@]} -eq 0 ] && [ -n "$(ls -A artifacts 2>/dev/null)" ]; then
+            # A run that built one platform: download-artifact put that artifact's files straight
+            # into artifacts/. Move them into a folder named as the artifact would be.
+            if compgen -G "artifacts/*.exe" > /dev/null; then platform=windows-x86_64
+            elif compgen -G "artifacts/*.apk" > /dev/null; then platform=android-arm64
+            elif compgen -G "artifacts/*.dmg" > /dev/null; then platform=macos-arm64
+            elif compgen -G "artifacts/*aarch64*" > /dev/null; then platform=linux-aarch64
+            else platform=linux-x86_64
+            fi
+            one="eglantine-${platform}-${GITHUB_SHA}"
+            mkdir "$one"
+            mv artifacts/* "$one"/
+            mv "$one" artifacts/
+            downloaded=("artifacts/$one/")
+          fi
           if [ ${#downloaded[@]} -eq 0 ]; then
             echo "No binaries were downloaded into artifacts/: every platform failed" >&2
             exit 1
