@@ -240,7 +240,8 @@ void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebu
         const auto guest = Common::GetHostOverlay().GetGuestTexture();
         Tegra::FramebufferConfig texture{};
         texture.address = guest.visible ? guest.address : 0;
-        texture.find_by_size = guest.visible && guest.address == 0;
+        texture.own_copy = guest.visible && guest.address == 0;
+        texture.find_by_size = texture.own_copy && guest.search;
         texture.width = guest.width ? guest.width : 1;
         texture.height = guest.height ? guest.height : 1;
         texture.stride = texture.width;

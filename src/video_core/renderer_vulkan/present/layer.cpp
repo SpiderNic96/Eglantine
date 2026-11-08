@@ -100,7 +100,7 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
             : rasterizer.AccelerateDisplay(framebuffer, framebuffer.address + framebuffer.offset,
                                            framebuffer.stride);
     // A find_by_size layer draws its own copy (raw images), of the framebuffer's size.
-    const bool own_copy = framebuffer.find_by_size;
+    const bool own_copy = framebuffer.own_copy;
     const bool from_cache = texture_info.has_value() && !own_copy;
     const u32 texture_width = from_cache ? texture_info->width : framebuffer.width;
     const u32 texture_height = from_cache ? texture_info->height : framebuffer.height;

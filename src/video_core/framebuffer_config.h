@@ -50,6 +50,8 @@ struct FramebufferConfig {
     std::optional<std::array<float, 4>> dest_rect{};
     /// Not at `address`: the newest RGBA8 render target of width x height (texture cache).
     bool find_by_size{};
+    /// Shows the layer's own copy of the last image found by size.
+    bool own_copy{};
 };
 
 Common::Rectangle<f32> NormalizeCrop(const FramebufferConfig& framebuffer, u32 texture_width,

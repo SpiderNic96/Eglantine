@@ -61,7 +61,8 @@ constexpr u64 TextureNvnOffset = 0x58;      // texture object -> its NVNtexture
 constexpr float CellUnits = 800.f;
 constexpr float CellOrigin = 102400.f;      // world -102400 is cell 0
 constexpr u32 TextureSize = 1024;
-constexpr u32 RequestEveryTicks = 15;       // ask for a redraw 4 times a second
+constexpr u32 DefaultRefreshMs = 2000;      // ask for a redraw this often (if it changed)
+constexpr s64 SearchNs = 600'000'000;      // after a redraw the renderer looks for the texture
 
 struct Color {
     float r, g, b, a; // 0..1, straight alpha
@@ -266,6 +267,7 @@ struct MapInfo {
     u64 fields = 0;               // the map system's MinimapFields
     u64 address = 0;              // the texture's device address, once found
     bool searched = false;
+    std::chrono::steady_clock::time_point redrawn{};
 };
 std::mutex g_map_mutex;
 MapInfo g_map;
@@ -346,6 +348,7 @@ void OnMinimapRender(Core::System& system, Kernel::Svc::ThreadContext& ctx) {
     g_map.cell_px = cell_px;
     g_map.fields = ctx.r[24];
     g_map.drawn = true;
+    g_map.redrawn = std::chrono::steady_clock::now();
     if (!g_map.searched) {
         FindTexture(system, g_map.fields);
     }
@@ -515,6 +518,7 @@ PanelView MapView(const CameraInfo& cam) {
     Common::HostOverlay::GuestTexture texture{};
     texture.visible = true;
     texture.address = map.address;
+    texture.search = std::chrono::steady_clock::now() - map.redrawn < std::chrono::nanoseconds{SearchNs};
     texture.width = TextureSize;
     texture.height = TextureSize;
     texture.crop[0] = view.crop_x;
@@ -579,7 +583,12 @@ void Tick() {
     if (!overlay.Enabled()) {
         overlay.SetEnabled(true);
     }
-    if (s.mark_changed || s.frame % RequestEveryTicks == 0) {
+    static const u32 refresh_ticks = [] {
+        const char* v = std::getenv("EDEN_POKOPIA_MAP_REFRESH_MS");
+        const long ms = v != nullptr ? std::strtol(v, nullptr, 10) : DefaultRefreshMs;
+        return static_cast<u32>(std::max<long>(1, ms * 60 / 1000));
+    }();
+    if (s.mark_changed || s.frame % refresh_ticks == 0) {
         RequestRedraw(*g_system, s.mark_changed, !s.requested_once);
         s.requested_once = true;
         s.mark_changed = false;
