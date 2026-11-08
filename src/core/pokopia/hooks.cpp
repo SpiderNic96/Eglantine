@@ -180,6 +180,31 @@ HookInstaller::HookInstaller(std::span<u8> image_, u64 load_base_, std::size_t t
       text_end{text_offset_ + text_size}, text_mapped_end{text_offset_ + text_mapped},
       next_stub{Common::AlignUp(text_offset_ + text_size, 4)} {}
 
+std::optional<std::size_t> HookInstaller::FindGap(std::size_t words) {
+    // Zero words (udf #0) right after a return or an unconditional branch: alignment padding
+    // between two functions, which nothing runs.
+    const auto ends_code = [](u32 word) {
+        return word == 0xD65F03C0 || word == 0xD65F0FFF || word == 0xD65F0BFF ||
+               (word & 0xFFFFFC1F) == 0xD61F0000 || (word & 0xFC000000) == 0x14000000;
+    };
+    for (std::size_t at = std::max(gap_cursor, text_offset); at + (words + 1) * 4 <= text_end;
+         at += 4) {
+        if (!ends_code(ReadWord(image, at))) {
+            continue;
+        }
+        const std::size_t start = at + 4;
+        bool zero = true;
+        for (std::size_t i = 0; i < words && zero; ++i) {
+            zero = ReadWord(image, start + i * 4) == 0;
+        }
+        if (zero) {
+            gap_cursor = start + words * 4;
+            return start;
+        }
+    }
+    return std::nullopt;
+}
+
 bool HookInstaller::Add(std::size_t site_offset, Kernel::Svc::GuestHook hook, const char* what) {
     const std::size_t site = text_offset + site_offset;
     if (site + 4 > text_end) {
@@ -187,23 +212,38 @@ bool HookInstaller::Add(std::size_t site_offset, Kernel::Svc::GuestHook hook, co
         return false;
     }
     const u64 site_address = load_base + site_offset;
-    const std::size_t stub = next_stub;
-    const u64 stub_address = load_base + (stub - text_offset);
+    std::size_t stub = next_stub;
+    u64 stub_address = load_base + (stub - text_offset);
 
     const u32 original = ReadWord(image, site);
-    const auto moved = Relocate(original, site_address, stub_address + 4);
+    auto moved = Relocate(original, site_address, stub_address + 4);
     if (!moved) {
         LOG_ERROR(Loader, "Pokopia {}: cannot move instruction {:08x} at main+{:#x}", what,
                   original, site_offset);
         return false;
     }
     const std::size_t stub_words = 1 + moved->size() + 1;
-    const std::size_t stub_end = stub + stub_words * 4;
+    std::size_t stub_end = stub + stub_words * 4;
+    bool in_padding = true;
     if (stub_end > text_mapped_end ||
         !std::all_of(image.begin() + stub, image.begin() + stub_end,
                      [](u8 byte) { return byte == 0; })) {
-        LOG_ERROR(Loader, "Pokopia {}: no free space left after the text segment", what);
-        return false;
+        // The padding after the text segment is full: use padding between two functions.
+        const auto gap = FindGap(stub_words);
+        if (!gap) {
+            LOG_ERROR(Loader, "Pokopia {}: no free space left for a stub", what);
+            return false;
+        }
+        stub = *gap;
+        stub_address = load_base + (stub - text_offset);
+        moved = Relocate(original, site_address, stub_address + 4);
+        if (!moved || 1 + moved->size() + 1 != stub_words) {
+            LOG_ERROR(Loader, "Pokopia {}: cannot move instruction {:08x} at main+{:#x}", what,
+                      original, site_offset);
+            return false;
+        }
+        stub_end = stub + stub_words * 4;
+        in_padding = false;
     }
     const auto back = Branch(stub_address + (stub_words - 1) * 4, site_address + 4);
     const auto to_stub = Branch(site_address, stub_address);
@@ -220,7 +260,9 @@ bool HookInstaller::Add(std::size_t site_offset, Kernel::Svc::GuestHook hook, co
     }
     WriteWord(image, offset, *back);
     WriteWord(image, site, *to_stub);
-    next_stub = stub_end;
+    if (in_padding) {
+        next_stub = stub_end;
+    }
 
     Kernel::Svc::g_guest_hooks[stub_address] = hook;
     LOG_INFO(Loader, "Pokopia {}: hooked main+{:#x} ({:08x}), stub at main+{:#x}", what,

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <span>
 
 #include "common/common_types.h"
@@ -30,12 +31,15 @@ public:
     bool AddInline(std::size_t site, Kernel::Svc::GuestHook hook, const char* what);
 
 private:
+    std::optional<std::size_t> FindGap(std::size_t words);
+
     std::span<u8> image;
     u64 load_base;
     std::size_t text_offset;
     std::size_t text_end;
     std::size_t text_mapped_end;
     std::size_t next_stub;
+    std::size_t gap_cursor = 0;
 };
 
 } // namespace Core::Pokopia

@@ -7,6 +7,9 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <utility>
+#include <unordered_map>
+#include <bit>
 #include <mutex>
 #include <chrono>
 #include <cmath>
@@ -335,6 +338,8 @@ void FindTexture(Core::System& system, u64 fields) {
     }
 }
 
+void ClearIcons();
+
 void OnMinimapRender(Core::System& system, Kernel::Svc::ThreadContext& ctx) {
     std::scoped_lock lock{g_map_mutex};
     const s32 first_x = static_cast<s32>(ctx.r[21]);
@@ -344,6 +349,9 @@ void OnMinimapRender(Core::System& system, Kernel::Svc::ThreadContext& ctx) {
         cell_px != g_map.cell_px) {
         LOG_INFO(Loader, "Pokopia minimap: redrawn, first cell {} {}, {} texels a cell", first_x,
                  first_y, cell_px);
+    }
+    if (g_map.drawn && (first_x != g_map.first_x || first_y != g_map.first_y)) {
+        ClearIcons(); // another area
     }
     g_map.first_x = first_x;
     g_map.first_y = first_y;
@@ -383,6 +391,141 @@ void RequestRedraw(Core::System& system, bool mark_changed, bool first) {
         memory.Write8(fields + MinimapDirty, 1);
     }
     memory.Write8(fields + MinimapRequest, 1);
+}
+
+// ---- map icons ----
+// The pause menu's map places an icon per Pokémon and point of interest; each placing function
+// turns the thing's world x and z (in float registers) into the map's coordinates. Hooks there
+// keep what the menu showed. Pokémon also give their position's address (their component's
+// position, which the game keeps updating), so they move on the minimap live afterwards.
+struct IconSite {
+    u64 site;      // ldp s2, s3, [xN, #0xa8]: the map's centre, about to be subtracted
+    u8 x_reg, z_reg;
+};
+constexpr std::array<IconSite, 6> IconSites{{
+    {0xf64034, 9, 10},
+    {0xf65174, 13, 14},
+    {0xf65b40, 8, 9},
+    {0xf65ec8, 9, 10},
+    {0xf668c8, 9, 10},
+    {0xf66e58, 12, 13},
+}};
+// ldp x21, x20, [x0] after a Pokémon's position getter: x0 is the position, [sp + 0xc] its id.
+constexpr std::array<u64, 2> PokemonSites{0xf65798, 0xf65a58};
+constexpr std::array<Color, IconSites.size()> IconColors{{
+    {0.90f, 0.20f, 0.20f, 1.f}, // red
+    {0.20f, 0.45f, 0.95f, 1.f}, // blue
+    {1.00f, 0.55f, 0.10f, 1.f}, // orange
+    {0.65f, 0.30f, 0.90f, 1.f}, // purple
+    {0.10f, 0.80f, 0.85f, 1.f}, // cyan
+    {0.20f, 0.75f, 0.25f, 1.f}, // green
+}};
+constexpr Color PokemonColor{1.f, 0.85f, 0.15f, 1.f};
+
+struct Icon {
+    float x, z;
+    u8 kind;
+    u32 pass;
+};
+struct TrackedPokemon {
+    u64 position;
+    u32 pass;
+};
+std::mutex g_icon_mutex;
+std::vector<Icon> g_icons;
+std::unordered_map<u16, TrackedPokemon> g_pokemon;
+u32 g_pass = 0; // one per time the menu placed its icons
+std::chrono::steady_clock::time_point g_last_icon{}, g_pass_start{};
+std::array<u32, IconSites.size() + 1> g_icon_logged{};
+
+/// An icon was placed: a new pass when the last one was a while ago (the menu opened again).
+void TouchPass() {
+    const auto now = std::chrono::steady_clock::now();
+    if (now - g_last_icon > std::chrono::seconds(1)) {
+        ++g_pass;
+        g_pass_start = now;
+    }
+    g_last_icon = now;
+}
+
+float FloatReg(const Kernel::Svc::ThreadContext& ctx, u8 reg) {
+    return std::bit_cast<float>(static_cast<u32>(ctx.v[reg][0]));
+}
+
+template <std::size_t I>
+void OnIconPlaced(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    const float x = FloatReg(ctx, IconSites[I].x_reg);
+    const float z = FloatReg(ctx, IconSites[I].z_reg);
+    if (!std::isfinite(x) || !std::isfinite(z)) {
+        return;
+    }
+    std::scoped_lock lock{g_icon_mutex};
+    TouchPass();
+    if (g_icon_logged[I]++ < 3) {
+        LOG_INFO(Loader, "Pokopia minimap: icon kind {} at {:.0f} {:.0f}", I, x, z);
+    }
+    for (Icon& icon : g_icons) {
+        if (icon.kind == I && std::abs(icon.x - x) < 1.f && std::abs(icon.z - z) < 1.f) {
+            icon.pass = g_pass;
+            return;
+        }
+    }
+    if (g_icons.size() < 1024) {
+        g_icons.push_back({x, z, static_cast<u8>(I), g_pass});
+    }
+}
+
+void OnPokemonPlaced(Core::System& system, Kernel::Svc::ThreadContext& ctx) {
+    const u16 id = system.ApplicationMemory().Read16(ctx.sp + 0xc);
+    std::scoped_lock lock{g_icon_mutex};
+    TouchPass();
+    if (g_icon_logged.back()++ < 3) {
+        LOG_INFO(Loader, "Pokopia minimap: Pokémon {} with its position at {:#x}", id, ctx.r[0]);
+    }
+    g_pokemon[id] = TrackedPokemon{ctx.r[0], g_pass};
+}
+
+template <std::size_t... I>
+void AddIconHooks(HookInstaller& hooks, std::index_sequence<I...>) {
+    (hooks.Add(IconSites[I].site, &OnIconPlaced<I>, "minimap icons"), ...);
+}
+
+void ClearIcons() {
+    std::scoped_lock lock{g_icon_mutex};
+    g_icons.clear();
+    g_pokemon.clear();
+}
+
+struct MapMarks {
+    std::vector<std::pair<Vec, u8>> icons; // world x, z; kind
+    std::vector<Vec> pokemon;
+};
+
+/// What the menu last showed, with the Pokémon where they are now.
+MapMarks CollectMarks(Core::System& system) {
+    MapMarks marks;
+    auto& memory = system.ApplicationMemory();
+    std::scoped_lock lock{g_icon_mutex};
+    // Once a new pass has had time to place everything, drop what it no longer showed.
+    if (std::chrono::steady_clock::now() - g_pass_start > std::chrono::milliseconds(500)) {
+        std::erase_if(g_icons, [](const Icon& icon) { return icon.pass < g_pass; });
+        std::erase_if(g_pokemon, [](const auto& entry) { return entry.second.pass < g_pass; });
+    }
+    for (const Icon& icon : g_icons) {
+        marks.icons.push_back({Vec{icon.x, icon.z}, icon.kind});
+    }
+    for (const auto& [id, tracked] : g_pokemon) {
+        if (!Valid(memory, tracked.position, 12)) {
+            continue;
+        }
+        const float x = std::bit_cast<float>(memory.Read32(tracked.position));
+        const float z = std::bit_cast<float>(memory.Read32(tracked.position + 8));
+        if (std::isfinite(x) && std::isfinite(z) && std::abs(x) < CellOrigin &&
+            std::abs(z) < CellOrigin) {
+            marks.pokemon.push_back(Vec{x, z});
+        }
+    }
+    return marks;
 }
 
 struct State {
@@ -432,7 +575,8 @@ void DrawPing(Canvas& c, Vec at, Vec centre, float limit_x0, float limit_y0, flo
     Pointer(c, centre + dir * std::min(tx, ty), dir, 13.f, 5.f, Ping);
 }
 
-void Draw(State& s, const CameraInfo& cam, Vec forward, const PanelView& view) {
+void Draw(State& s, const CameraInfo& cam, Vec forward, const PanelView& view,
+          const MapMarks& marks) {
     Canvas& c = s.canvas;
     c.Clear();
     const Vec player{cam.target[0], cam.target[2]};
@@ -444,6 +588,23 @@ void Draw(State& s, const CameraInfo& cam, Vec forward, const PanelView& view) {
         c.Frame(PanelX0 - 5.f, PanelY0 - 5.f, x1 + 5.f, y1 + 5.f, 2.f, Dark);
         c.Text("N", PanelX0 + PanelSize * 0.5f, PanelY0 + 4.f, 2, White);
         const Vec at = view.ToPanel(player.x, player.y);
+        const auto inside = [x1, y1](Vec p) {
+            return p.x > PanelX0 + 2.f && p.x < x1 - 2.f && p.y > PanelY0 + 2.f && p.y < y1 - 2.f;
+        };
+        for (const auto& [where, kind] : marks.icons) {
+            const Vec p = view.ToPanel(where.x, where.y);
+            if (inside(p) && Length(p - at) > 4.f) {
+                c.Rect(p.x - 4.f, p.y - 4.f, p.x + 4.f, p.y + 4.f, Dark);
+                c.Rect(p.x - 2.8f, p.y - 2.8f, p.x + 2.8f, p.y + 2.8f, IconColors[kind]);
+            }
+        }
+        for (const Vec& where : marks.pokemon) {
+            const Vec p = view.ToPanel(where.x, where.y);
+            if (inside(p)) {
+                c.Disc(p, 4.f, Dark);
+                c.Disc(p, 2.8f, PokemonColor);
+            }
+        }
         if (s.ping) {
             DrawPing(c, view.ToPanel(s.ping_x, s.ping_z), at, PanelX0 + 6.f, PanelY0 + 6.f,
                      x1 - 6.f, y1 - 6.f);
@@ -602,6 +763,7 @@ void Tick() {
     const float flen = Length(forward);
     forward = flen > 1e-3f ? forward * (1.f / flen) : Vec{std::sin(cam.yaw), std::cos(cam.yaw)};
     const PanelView view = MapView(cam);
+    const MapMarks marks = view.live ? CollectMarks(*g_system) : MapMarks{};
 
     // Redraw only when something on it moved (the arrival pulse always moves).
     const auto q = [](float v, float step) { return static_cast<u64>(static_cast<s64>(v / step)); };
@@ -610,13 +772,17 @@ void Tick() {
                     (s.ping ? q(s.ping_x, 1.f) * 31ULL ^ q(s.ping_z, 1.f) * 131ULL ^ 1ULL : 0ULL) ^
                     (view.live ? q(view.crop_x, 1.f) * 65537ULL ^ q(view.crop_y, 1.f) * 257ULL ^ 2ULL
                                : 0ULL);
+    for (const Vec& p : marks.pokemon) {
+        signature = signature * 1099511628211ULL ^ (q(p.x, 16.f) * 2654435761ULL ^ q(p.y, 16.f));
+    }
+    signature ^= static_cast<u64>(marks.icons.size()) << 48;
     const bool arrived = s.ping && std::hypot(s.ping_x - cam.target[0],
                                               s.ping_z - cam.target[2]) < ArriveRange;
     if (signature == s.last_signature && !arrived && s.shown) {
         return;
     }
     s.last_signature = signature;
-    Draw(s, cam, forward, view);
+    Draw(s, cam, forward, view, marks);
     overlay.Publish(s.canvas.px);
     s.shown = true;
 }
@@ -670,6 +836,12 @@ void InstallNavOverlay(Core::System& system, HookInstaller& hooks, u64 main_base
 
     if (!hooks.AddInline(MinimapRenderSite, &OnMinimapRender, "minimap redraw")) {
         LOG_WARNING(Loader, "Pokopia navigation overlay: no live map (radar only)");
+    }
+    ClearIcons();
+    g_icon_logged = {};
+    AddIconHooks(hooks, std::make_index_sequence<IconSites.size()>{});
+    for (const u64 site : PokemonSites) {
+        hooks.Add(site, &OnPokemonPlaced, "minimap Pokémon");
     }
 
     auto& timing = system.CoreTiming();
