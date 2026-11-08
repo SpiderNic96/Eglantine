@@ -1185,6 +1185,8 @@ add_library(core STATIC
     pokopia/mouse_camera.h
     pokopia/nav_overlay.cpp
     pokopia/nav_overlay.h
+    pokopia/pokemon_cap.cpp
+    pokopia/pokemon_cap.h
     pokopia/pokopia.cpp
     pokopia/pokopia.h
     reporter.cpp

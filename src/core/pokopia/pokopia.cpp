@@ -14,6 +14,7 @@
 #include "core/pokopia/menu_mouse.h"
 #include "core/pokopia/mouse_camera.h"
 #include "core/pokopia/nav_overlay.h"
+#include "core/pokopia/pokemon_cap.h"
 
 namespace Core::Pokopia {
 
@@ -39,6 +40,7 @@ void Install(Core::System& system, std::span<u8> image, u64 load_base, u64 progr
         !std::equal(BuildId.begin(), BuildId.end(), build_id.begin())) {
         return;
     }
+    InstallPokemonCap(system, load_base); // data only, so it works with NCE too
     if (Settings::IsNceEnabled()) {
         // NCE runs the game's code natively, where a stub's svc would not reach the hooks.
         LOG_INFO(Loader, "Pokopia mouse features: not available with the NCE CPU backend");

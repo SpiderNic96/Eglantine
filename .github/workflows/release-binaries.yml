@@ -45,7 +45,7 @@ env:
   QT_VERSION: "6.8.3"
   # Releases are tagged <channel>-build-<number> so they never clash with upstream's build-<number>,
   # and the update checker reads this fork's releases, not notsapinho's.
-  RELEASE_CHANNEL: mouse
+  RELEASE_CHANNEL: pokecap
 
 # A running build is never cancelled: it finishes and publishes. A push meanwhile queues one build;
 # a later push replaces it, so the newest commit builds as soon as the running one is done.
@@ -768,5 +768,5 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --target "${GITHUB_SHA}" \
             --prerelease \
-            --title "Eglantine Joy-Con 2 mouse build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7})" \
+            --title "Eglantine mouse + Pokémon cap build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7})" \
             --notes-file notes.md
