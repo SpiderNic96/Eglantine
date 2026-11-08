@@ -6,10 +6,13 @@
 #include <algorithm>
 #include <cstring>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 #include "common/alignment.h"
 #include "common/logging.h"
+#include "core/core.h"
+#include "core/memory.h"
 
 namespace Core::Pokopia {
 
@@ -91,7 +94,85 @@ void WriteWord(std::span<u8> image, std::size_t offset, u32 word) {
     std::memcpy(image.data() + offset, &word, sizeof(word));
 }
 
+// STR (immediate, unsigned offset), any size, general registers: size:111001:00:imm12:Rn:Rt.
+bool IsPlainStore(u32 word) {
+    return (word & 0x3FC00000U) == 0x39000000U;
+}
+
+struct InlineHook {
+    Kernel::Svc::GuestHook hook;
+    u32 original;
+};
+
+std::unordered_map<u64, InlineHook>& InlineHooks() {
+    static std::unordered_map<u64, InlineHook> hooks;
+    return hooks;
+}
+
+u64 Reg(const Kernel::Svc::ThreadContext& ctx, u32 index, bool sp) {
+    if (index < 29) {
+        return ctx.r[index];
+    }
+    if (index == 29) {
+        return ctx.fp;
+    }
+    if (index == 30) {
+        return ctx.lr;
+    }
+    return sp ? ctx.sp : 0;
+}
+
+void RunInline(Core::System& system, Kernel::Svc::ThreadContext& ctx) {
+    const u64 site = ctx.pc - 4;
+    const auto it = InlineHooks().find(site);
+    if (it == InlineHooks().end()) {
+        return;
+    }
+    it->second.hook(system, ctx);
+    const u32 word = it->second.original;
+    const u32 size = word >> 30;
+    const u64 address = Reg(ctx, (word >> 5) & 31, true) + (u64{(word >> 10) & 0xFFF} << size);
+    const u64 value = Reg(ctx, word & 31, false);
+    auto& memory = system.ApplicationMemory();
+    switch (size) {
+    case 0:
+        memory.Write8(address, static_cast<u8>(value));
+        break;
+    case 1:
+        memory.Write16(address, static_cast<u16>(value));
+        break;
+    case 2:
+        memory.Write32(address, static_cast<u32>(value));
+        break;
+    default:
+        memory.Write64(address, value);
+        break;
+    }
+}
+
 } // namespace
+
+bool HookInstaller::AddInline(std::size_t site_offset, Kernel::Svc::GuestHook hook,
+                              const char* what) {
+    const std::size_t site = text_offset + site_offset;
+    if (site + 4 > text_end) {
+        LOG_ERROR(Loader, "Pokopia {}: main+{:#x} is outside the text segment", what, site_offset);
+        return false;
+    }
+    const u32 original = ReadWord(image, site);
+    if (!IsPlainStore(original)) {
+        LOG_ERROR(Loader, "Pokopia {}: main+{:#x} holds {:08x}, not a plain store", what,
+                  site_offset, original);
+        return false;
+    }
+    const u64 site_address = load_base + site_offset;
+    InlineHooks()[site_address] = InlineHook{hook, original};
+    Kernel::Svc::g_guest_hooks[site_address] = &RunInline;
+    WriteWord(image, site, SvcHook);
+    LOG_INFO(Loader, "Pokopia {}: hooked main+{:#x} ({:08x}) in place", what, site_offset,
+             original);
+    return true;
+}
 
 HookInstaller::HookInstaller(std::span<u8> image_, u64 load_base_, std::size_t text_offset_,
                              std::size_t text_size, std::size_t text_mapped)

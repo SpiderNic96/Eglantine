@@ -24,6 +24,11 @@ public:
     /// the padding is full; the module is then unchanged at that site.
     bool Add(std::size_t site, Kernel::Svc::GuestHook hook, const char* what);
 
+    /// A hook that needs no stub: svc 0x7d replaces the instruction at `site`, and after the hook
+    /// the host does what that instruction did. Only plain stores (STR/STRB/STRH Wt|Xt, [Xn, #imm])
+    /// are supported; false (logged) for anything else.
+    bool AddInline(std::size_t site, Kernel::Svc::GuestHook hook, const char* what);
+
 private:
     std::span<u8> image;
     u64 load_base;

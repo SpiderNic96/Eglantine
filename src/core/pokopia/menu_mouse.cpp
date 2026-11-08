@@ -841,27 +841,29 @@ void LogMenu() {
     static auto last_time = std::chrono::steady_clock::time_point{};
     static int dumps = 0;
     const State& s = St();
+    // Only in play with something on screen: the title and loading screens would use the dumps up.
+    CameraInfo cam{};
+    if (dumps >= 120 || !CameraState(*g_system, &cam)) {
+        return;
+    }
     u64 sig = 0;
     for (const Layout& l : s.layouts) {
-        sig = sig * 1000003ULL + (static_cast<u64>(l.id) << 32 | l.sub) + 1;
+        if (l.visible != 0) {
+            sig = sig * 1000003ULL + (static_cast<u64>(l.id) << 32 | l.sub) + 1;
+        }
     }
     const auto now = std::chrono::steady_clock::now();
-    if (dumps >= 40 || (sig == last_sig && now - last_time < std::chrono::seconds(2))) {
+    if (sig == 0 || (sig == last_sig && now - last_time < std::chrono::seconds(2))) {
         return;
     }
     last_sig = sig;
     last_time = now;
     ++dumps;
-    CameraInfo cam{};
-    if (CameraState(*g_system, &cam)) {
-        LOG_INFO(Loader,
-                 "menu dump {}: player (camera target) {:.2f} {:.2f} {:.2f}, eye {:.2f} {:.2f} "
-                 "{:.2f}, yaw {:.4f}, pitch {:.4f}",
-                 dumps, cam.target[0], cam.target[1], cam.target[2], cam.eye[0], cam.eye[1],
-                 cam.eye[2], cam.yaw, cam.pitch);
-    } else {
-        LOG_INFO(Loader, "menu dump {}: no camera yet", dumps);
-    }
+    LOG_INFO(Loader,
+             "menu dump {}: player (camera target) {:.2f} {:.2f} {:.2f}, eye {:.2f} {:.2f} "
+             "{:.2f}, yaw {:.4f}, pitch {:.4f}",
+             dumps, cam.target[0], cam.target[1], cam.target[2], cam.eye[0], cam.eye[1],
+             cam.eye[2], cam.yaw, cam.pitch);
     for (std::size_t li = 0; li < s.layouts.size(); ++li) {
         const Layout& l = s.layouts[li];
         if (l.visible == 0) {
@@ -1104,9 +1106,14 @@ bool InstallMenuMouse(Core::System& system, HookInstaller& hooks, u64 main_base)
         pane.frame.store(0, std::memory_order_relaxed);
     }
     g_draw_calls = 0;
-    int drawn = hooks.Add(DrawSiteX21, &HookPaneDrawX21, "menu mouse (pane draw)") ? 1 : 0;
+    // In place (no stub): the text segment's padding has room for only a few stubs.
+    const auto add = [&hooks](u64 site, Kernel::Svc::GuestHook hook) {
+        return hooks.AddInline(site, hook, "menu mouse (pane draw)") ||
+               hooks.Add(site, hook, "menu mouse (pane draw)");
+    };
+    int drawn = add(DrawSiteX21, &HookPaneDrawX21) ? 1 : 0;
     for (const u64 site : DrawSitesX0) {
-        drawn += hooks.Add(site, &HookPaneDrawX0, "menu mouse (pane draw)") ? 1 : 0;
+        drawn += add(site, &HookPaneDrawX0) ? 1 : 0;
     }
     LOG_INFO(Loader, "Pokopia menu mouse: {} of {} pane draw hooks in", drawn,
              DrawSitesX0.size() + 1);
