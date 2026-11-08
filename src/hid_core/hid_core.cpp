@@ -239,6 +239,14 @@ bool HIDCore::IsCameraLive() const {
     return now - last <= 250'000'000;
 }
 
+void HIDCore::RequestNavPing() {
+    nav_ping = true;
+}
+
+bool HIDCore::TakeNavPing() {
+    return nav_ping.exchange(false);
+}
+
 void HIDCore::SetPointerRequested(bool requested) {
     pointer_requested = requested;
 }

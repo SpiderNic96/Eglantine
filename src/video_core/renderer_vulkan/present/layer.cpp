@@ -12,6 +12,7 @@
 #undef BadValue
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
+#include "common/host_overlay.h"
 #include "common/settings.h"
 #include "video_core/framebuffer_config.h"
 #include "video_core/renderer_vulkan/present/fsr.h"
@@ -92,8 +93,11 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
                           VkSampler sampler, size_t image_index,
                           const Tegra::FramebufferConfig& framebuffer,
                           const Layout::FramebufferLayout& layout) {
-    const auto texture_info = rasterizer.AccelerateDisplay(
-        framebuffer, framebuffer.address + framebuffer.offset, framebuffer.stride);
+    const auto texture_info =
+        framebuffer.host_overlay
+            ? std::nullopt
+            : rasterizer.AccelerateDisplay(framebuffer, framebuffer.address + framebuffer.offset,
+                                           framebuffer.stride);
     const u32 texture_width = texture_info ? texture_info->width : framebuffer.width;
     const u32 texture_height = texture_info ? texture_info->height : framebuffer.height;
     const u32 scaled_width = texture_info ? texture_info->scaled_width : texture_width;
@@ -104,10 +108,12 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
                                             Service::Nvnflinger::LayerStackId::Recording)) == 0;
 
     RefreshResources(device, framebuffer);
-    SetAntiAliasPass(device);
+    if (!framebuffer.host_overlay) {
+        SetAntiAliasPass(device);
 #ifdef HAS_RESHADE
-    SetPostProcessPass(device, is_applet);
+        SetPostProcessPass(device, is_applet);
 #endif
+    }
 
     // Finish any pending renderpass
     scheduler.RequestOutsideRenderPassOperationContext();
@@ -142,7 +148,9 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
         .height = scaled_height,
     };
 
-    if (auto* fsr = std::get_if<FSR>(&sr_filter)) {
+    if (framebuffer.host_overlay) {
+        // drawn as is: no upscaler
+    } else if (auto* fsr = std::get_if<FSR>(&sr_filter)) {
         source_image_view = fsr->Draw(device, scheduler, image_index, source_image, source_image_view, render_extent, crop_rect);
         crop_rect = {0, 0, 1, 1};
     } else if (auto* sgsr = std::get_if<SGSR>(&sr_filter)) {
@@ -347,7 +355,12 @@ void Layer::UpdateRawImage(const Tegra::FramebufferConfig& framebuffer, size_t i
     const u64 image_offset = GetRawImageOffset(framebuffer, image_index);
 
     const DAddr framebuffer_addr = framebuffer.address + framebuffer.offset;
-    const u8* const host_ptr = device_memory.GetPointer<u8>(framebuffer_addr);
+    const u8* const host_ptr =
+        framebuffer.host_overlay ? nullptr : device_memory.GetPointer<u8>(framebuffer_addr);
+    if (framebuffer.host_overlay) {
+        Common::GetHostOverlay().CopyTo(mapped_span.subspan(image_offset, GetSizeInBytes(framebuffer)));
+        buffer.Flush();
+    }
 
     // TODO(Rodrigo): Read this from HLE
     constexpr u32 block_height_log2 = 4;

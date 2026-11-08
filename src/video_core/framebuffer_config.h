@@ -42,6 +42,8 @@ struct FramebufferConfig {
     BlendMode blending{};
     bool native_tiling{};
     u32 layer_stack_mask{Service::Nvnflinger::DefaultLayerStackMask};
+    /// Not guest memory: the emulator's own overlay (common/host_overlay.h), linear RGBA8.
+    bool host_overlay{};
 };
 
 Common::Rectangle<f32> NormalizeCrop(const FramebufferConfig& framebuffer, u32 texture_width,

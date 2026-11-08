@@ -14,6 +14,7 @@
 
 #include <fmt/ranges.h>
 
+#include "common/host_overlay.h"
 #include "common/logging.h"
 #include <ranges>
 #include "common/scope_exit.h"
@@ -231,6 +232,20 @@ void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebu
     Frame* frame = present_manager.GetRenderFrame();
 
     scheduler.RequestOutsideRenderPassOperationContext();
+    // Game mods' own overlay (common/host_overlay.h) goes over the game's layers.
+    std::vector<Tegra::FramebufferConfig> with_overlay;
+    if (Common::GetHostOverlay().Enabled() && !framebuffers.empty()) {
+        with_overlay.assign(framebuffers.begin(), framebuffers.end());
+        Tegra::FramebufferConfig overlay{};
+        overlay.width = Common::HostOverlay::Width;
+        overlay.height = Common::HostOverlay::Height;
+        overlay.stride = Common::HostOverlay::Width;
+        overlay.pixel_format = Service::android::PixelFormat::Rgba8888;
+        overlay.blending = Tegra::BlendMode::Premultiplied;
+        overlay.host_overlay = true;
+        with_overlay.push_back(overlay);
+        framebuffers = with_overlay;
+    }
     blit_swapchain.DrawToFrame(device, rasterizer, frame, framebuffers,
                                render_window.GetFramebufferLayout(),
                                present_manager.SwapchainImageCount(),

@@ -1183,6 +1183,8 @@ add_library(core STATIC
     pokopia/menu_mouse.h
     pokopia/mouse_camera.cpp
     pokopia/mouse_camera.h
+    pokopia/nav_overlay.cpp
+    pokopia/nav_overlay.h
     pokopia/pokopia.cpp
     pokopia/pokopia.h
     reporter.cpp

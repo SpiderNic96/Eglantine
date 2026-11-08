@@ -7,11 +7,13 @@
 #include <array>
 #include <cstdlib>
 
+#include "common/host_overlay.h"
 #include "common/logging.h"
 #include "common/settings.h"
 #include "core/pokopia/hooks.h"
 #include "core/pokopia/menu_mouse.h"
 #include "core/pokopia/mouse_camera.h"
+#include "core/pokopia/nav_overlay.h"
 
 namespace Core::Pokopia {
 
@@ -32,6 +34,7 @@ bool Off(const char* variable) {
 void Install(Core::System& system, std::span<u8> image, u64 load_base, u64 program_id,
              std::span<const u8> build_id, std::size_t text_offset, std::size_t text_size,
              std::size_t text_mapped) {
+    Common::GetHostOverlay().SetEnabled(false);
     if (program_id != ProgramId || build_id.size() < BuildId.size() ||
         !std::equal(BuildId.begin(), BuildId.end(), build_id.begin())) {
         return;
@@ -51,6 +54,11 @@ void Install(Core::System& system, std::span<u8> image, u64 load_base, u64 progr
         LOG_INFO(Loader, "Pokopia menu mouse: off (EDEN_POKOPIA_MENU_MOUSE=0)");
     } else {
         InstallMenuMouse(system, hooks, load_base);
+    }
+    if (Off("EDEN_POKOPIA_MOUSE_CAMERA") || Off("EDEN_POKOPIA_NAV")) {
+        LOG_INFO(Loader, "Pokopia navigation overlay: off");
+    } else {
+        InstallNavOverlay(system);
     }
 }
 

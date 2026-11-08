@@ -108,6 +108,10 @@ public:
     void SetPointerRequested(bool requested);
     bool IsPointerRequested() const;
 
+    /// The player pressed the ping key (core/pokopia's navigation overlay); taking clears it.
+    void RequestNavPing();
+    bool TakeNavPing();
+
     /// Sets all emulated controllers into configuring mode.
     void EnableAllControllerConfiguration();
 
@@ -146,6 +150,7 @@ public:
     std::atomic<bool> pointer_requested{false};
     std::atomic<bool> menu_up{false};
     std::atomic<u64> menu_buttons{0};
+    std::atomic<bool> nav_ping{false};
     std::mutex mouse_look_mutex;
     s32 mouse_look_x{};
     s32 mouse_look_y{};

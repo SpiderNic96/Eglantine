@@ -437,6 +437,11 @@ void GRenderWindow::keyPressEvent(QKeyEvent* event) {
         input_subsystem->GetKeyboard()->PressKeyboardKey(key);
         // This is used for gamepads that can have any key mapped
         input_subsystem->GetKeyboard()->PressKey(event->key());
+        // G drops or lifts the navigation ping in games with the overlay (core/pokopia).
+        if (event->key() == Qt::Key_G && QtCommon::system &&
+            QtCommon::system->HIDCore().IsMouseCameraHooked()) {
+            QtCommon::system->HIDCore().RequestNavPing();
+        }
     }
 }
 
