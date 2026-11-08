@@ -81,7 +81,7 @@ jobs:
             desktop=$(jq -c . <<< "$all")
             android=true
           else
-            desktop=$(jq -c --arg w ",$wanted," '[.[] | select($w | contains("," + .platform + ","))]' <<< "$all")
+            desktop=$(jq -c --arg w ",$wanted," '[.[] | .platform as $p | select($w | contains("," + $p + ","))]' <<< "$all")
             android=false
             [[ ",$wanted," == *,android-arm64,* ]] && android=true
           fi
