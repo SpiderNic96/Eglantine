@@ -4,6 +4,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include <variant>
 #include "video_core/present.h"
 #include "video_core/renderer_vulkan/present/anti_alias_pass.h"
@@ -93,9 +94,10 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
                           VkSampler sampler, size_t image_index,
                           const Tegra::FramebufferConfig& framebuffer,
                           const Layout::FramebufferLayout& layout) {
-    const bool modded = framebuffer.host_overlay || framebuffer.dest_rect.has_value();
+    const bool host_image = framebuffer.host_overlay || framebuffer.host_fill.has_value();
+    const bool modded = host_image || framebuffer.dest_rect.has_value();
     const auto texture_info =
-        framebuffer.host_overlay
+        host_image
             ? std::nullopt
             : rasterizer.AccelerateDisplay(framebuffer, framebuffer.address + framebuffer.offset,
                                            framebuffer.stride);
@@ -126,7 +128,7 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
         resource_ticks[image_index] = scheduler.CurrentTick();
     };
 
-    if (!use_accelerated && !framebuffer.dest_rect) {
+    if (!use_accelerated && (!framebuffer.dest_rect || framebuffer.host_fill)) {
         UpdateRawImage(framebuffer, image_index);
     }
     if (own_copy) {
@@ -193,8 +195,9 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
         // A part of the screen; nothing at all when the texture cache does not hold the image.
         const auto& screen = layout.screen;
         const auto& d = *framebuffer.dest_rect;
-        const f32 w = use_accelerated ? f32(screen.GetWidth()) : 0.f;
-        const f32 h = use_accelerated ? f32(screen.GetHeight()) : 0.f;
+        const bool drawable = use_accelerated || framebuffer.host_fill.has_value();
+        const f32 w = drawable ? f32(screen.GetWidth()) : 0.f;
+        const f32 h = drawable ? f32(screen.GetHeight()) : 0.f;
         const f32 x0 = f32(screen.left) + d[0] * w, x1 = f32(screen.left) + d[2] * w;
         const f32 y0 = f32(screen.top) + d[1] * h, y1 = f32(screen.top) + d[3] * h;
         auto& v = out_push_constants->vertices;
@@ -439,7 +442,12 @@ void Layer::UpdateRawImage(const Tegra::FramebufferConfig& framebuffer, size_t i
 
     const DAddr framebuffer_addr = framebuffer.address + framebuffer.offset;
     const u8* const host_ptr =
-        framebuffer.host_overlay ? nullptr : device_memory.GetPointer<u8>(framebuffer_addr);
+        (framebuffer.host_overlay || framebuffer.host_fill) ? nullptr : device_memory.GetPointer<u8>(framebuffer_addr);
+    if (framebuffer.host_fill) {
+        const u32 colour = *framebuffer.host_fill;
+        std::memcpy(mapped_span.data() + image_offset, &colour, sizeof(colour));
+        buffer.Flush();
+    }
     if (framebuffer.host_overlay) {
         Common::GetHostOverlay().CopyTo(mapped_span.subspan(image_offset, GetSizeInBytes(framebuffer)));
         buffer.Flush();

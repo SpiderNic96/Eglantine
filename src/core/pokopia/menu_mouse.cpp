@@ -43,6 +43,7 @@
 #include "core/memory.h"
 #include "core/pokopia/hooks.h"
 #include "core/pokopia/mouse_camera.h"
+#include "core/pokopia/nav_overlay.h"
 #include "hid_core/frontend/emulated_devices.h"
 #include "hid_core/hid_core.h"
 #include "hid_core/hid_types.h"
@@ -83,6 +84,7 @@ constexpr u32 DrawnFrames = 3;
 
 // The title's "(-) Settings" key guide (Recompia's menu_key_guides default): a click on it is -.
 constexpr u32 KeyGuideSettings = 881468973;
+constexpr const char* MenuMapPane = "Win_0200_base_minimap"; // the pause menu's map
 
 // Steering and taps, in ticks of TickNs.
 constexpr auto TickNs = std::chrono::nanoseconds{16'000'000};
@@ -985,6 +987,16 @@ void OnClick(float px, float py, bool inside, bool camera_live) {
                 if (LogOk()) {
                     LOG_INFO(Loader, "Pokopia menu mouse: click on key guide '{}' -> -", p.name);
                 }
+                return;
+            }
+        }
+    }
+    // A click on the pause menu's map puts the navigation ping there (nav_overlay).
+    if (inside) {
+        for (const Pane& p : s.panes) {
+            if (std::strcmp(p.name, MenuMapPane) == 0 && p.contains(px, py) && p.x1 > p.x0 &&
+                p.y1 > p.y0 &&
+                PingFromMenuMap((px - p.x0) / (p.x1 - p.x0), (py - p.y0) / (p.y1 - p.y0))) {
                 return;
             }
         }

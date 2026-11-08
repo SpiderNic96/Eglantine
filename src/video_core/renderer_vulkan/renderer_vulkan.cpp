@@ -238,6 +238,17 @@ void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebu
         with_overlay.assign(framebuffers.begin(), framebuffers.end());
         // Always present (empty when hidden): a change in the layer count rebuilds the layers.
         const auto guest = Common::GetHostOverlay().GetGuestTexture();
+        // The texture's background (under its see-through parts); empty when there is none.
+        Tegra::FramebufferConfig underlay{};
+        underlay.width = underlay.height = underlay.stride = 1;
+        underlay.pixel_format = Service::android::PixelFormat::Rgba8888;
+        underlay.blending = Tegra::BlendMode::Opaque;
+        underlay.host_fill = guest.underlay;
+        underlay.dest_rect = guest.visible && guest.underlay != 0
+                                 ? std::array<float, 4>{guest.dest[0], guest.dest[1],
+                                                        guest.dest[2], guest.dest[3]}
+                                 : std::array<float, 4>{};
+        with_overlay.push_back(underlay);
         Tegra::FramebufferConfig texture{};
         texture.address = guest.visible ? guest.address : 0;
         texture.own_copy = guest.visible && guest.address == 0;
@@ -246,7 +257,7 @@ void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebu
         texture.height = guest.height ? guest.height : 1;
         texture.stride = texture.width;
         texture.pixel_format = Service::android::PixelFormat::Rgba8888;
-        texture.blending = Tegra::BlendMode::Opaque;
+        texture.blending = Tegra::BlendMode::Premultiplied;
         texture.crop_rect = Common::Rectangle<int>(
             static_cast<int>(guest.crop[0]), static_cast<int>(std::min(guest.crop[1], guest.crop[3])),
             static_cast<int>(guest.crop[2]), static_cast<int>(std::max(guest.crop[1], guest.crop[3])));

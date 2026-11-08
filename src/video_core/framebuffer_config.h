@@ -52,6 +52,8 @@ struct FramebufferConfig {
     bool find_by_size{};
     /// Shows the layer's own copy of the last image found by size.
     bool own_copy{};
+    /// Not guest memory: a 1x1 image of this colour (RGBA8, R in the low byte), for backgrounds.
+    std::optional<u32> host_fill{};
 };
 
 Common::Rectangle<f32> NormalizeCrop(const FramebufferConfig& framebuffer, u32 texture_width,

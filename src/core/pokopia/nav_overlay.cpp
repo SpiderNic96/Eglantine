@@ -61,6 +61,7 @@ constexpr u64 TextureNvnOffset = 0x58;      // texture object -> its NVNtexture
 constexpr float CellUnits = 800.f;
 constexpr float CellOrigin = 102400.f;      // world -102400 is cell 0
 constexpr u32 TextureSize = 1024;
+constexpr u32 MapBackground = 0xFFE4E4E4;    // under the map's see-through cells, as in the menu
 constexpr u32 DefaultRefreshMs = 2000;      // ask for a redraw this often (if it changed)
 constexpr s64 SearchNs = 600'000'000;      // after a redraw the renderer looks for the texture
 
@@ -264,6 +265,7 @@ struct MapInfo {
     bool drawn = false;
     s32 first_x = 0, first_y = 0; // the texture's first cell
     u32 cell_px = 16;             // texels per cell
+    s32 extent = 0;               // the area's size in cells (the larger side)
     u64 fields = 0;               // the map system's MinimapFields
     u64 address = 0;              // the texture's device address, once found
     bool searched = false;
@@ -346,6 +348,7 @@ void OnMinimapRender(Core::System& system, Kernel::Svc::ThreadContext& ctx) {
     g_map.first_x = first_x;
     g_map.first_y = first_y;
     g_map.cell_px = cell_px;
+    g_map.extent = static_cast<s32>(ctx.r[19]);
     g_map.fields = ctx.r[24];
     g_map.drawn = true;
     g_map.redrawn = std::chrono::steady_clock::now();
@@ -529,6 +532,7 @@ PanelView MapView(const CameraInfo& cam) {
     texture.dest[1] = PanelY0 / H;
     texture.dest[2] = (PanelX0 + PanelSize) / W;
     texture.dest[3] = (PanelY0 + PanelSize) / H;
+    texture.underlay = MapBackground;
     Common::GetHostOverlay().SetGuestTexture(texture);
     return view;
 }
@@ -618,6 +622,31 @@ void Tick() {
 }
 
 } // namespace
+
+bool PingFromMenuMap(float u, float v) {
+    MapInfo map;
+    {
+        std::scoped_lock lock{g_map_mutex};
+        map = g_map;
+    }
+    if (!map.drawn || map.extent <= 0 || u < 0.f || u > 1.f || v < 0.f || v > 1.f) {
+        return false;
+    }
+    // The menu shows the area: extent cells around the texture's centre.
+    const float span = static_cast<float>(map.extent) * static_cast<float>(map.cell_px);
+    const float tx = TextureSize * 0.5f + (u - 0.5f) * span;
+    const float ty = TextureSize * 0.5f + (v - 0.5f) * span;
+    State& s = St();
+    s.ping = true;
+    s.ping_x = (tx / map.cell_px + map.first_x) * CellUnits - CellOrigin;
+    s.ping_z = (ty / map.cell_px + map.first_y) * CellUnits - CellOrigin;
+    CameraInfo cam{};
+    s.ping_y = CameraState(*g_system, &cam) ? cam.target[1] : 0.f;
+    s.last_signature = ~u64{0};
+    LOG_INFO(Loader, "Pokopia navigation: ping from the menu's map ({:.2f}, {:.2f}) at {:.0f} {:.0f}",
+             u, v, s.ping_x, s.ping_z);
+    return true;
+}
 
 void InstallNavOverlay(Core::System& system, HookInstaller& hooks, u64 main_base) {
     g_system = &system;

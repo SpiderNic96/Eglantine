@@ -23,4 +23,8 @@ class HookInstaller;
 /// learn which part of the world it covers.
 void InstallNavOverlay(Core::System& system, HookInstaller& hooks, u64 main_base);
 
+/// A click on the pause menu's map at (u, v), 0..1 across it: puts the ping there. False if the
+/// map's area is not known yet.
+bool PingFromMenuMap(float u, float v);
+
 } // namespace Core::Pokopia

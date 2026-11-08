@@ -1620,11 +1620,7 @@ std::pair<typename P::ImageView*, bool> TextureCache<P>::FindRenderTargetBySize(
     if (!best) {
         return {};
     }
-    ImageViewInfo view_info{ImageViewType::e2D, PixelFormat::A8B8G8R8_UNORM};
-    view_info.x_source = static_cast<u8>(SwizzleSource::R);
-    view_info.y_source = static_cast<u8>(SwizzleSource::G);
-    view_info.z_source = static_cast<u8>(SwizzleSource::B);
-    view_info.w_source = static_cast<u8>(SwizzleSource::OneFloat);
+    const ImageViewInfo view_info{ImageViewType::e2D, PixelFormat::A8B8G8R8_UNORM};
     return {&slot_image_views[FindOrEmplaceImageView(best, view_info)],
             slot_images[best].IsRescaled()};
 }

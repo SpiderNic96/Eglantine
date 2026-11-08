@@ -57,6 +57,7 @@ public:
                                     ///< redrawn); otherwise show the last copy
         float crop[4]{};            ///< texels shown: left, top, right, bottom (top > bottom flips)
         float dest[4]{};            ///< where on the game's picture, 0..1: left, top, right, bottom
+        u32 underlay = 0;           ///< drawn under it in `dest` when not 0 (RGBA8, R low byte)
     };
     void SetGuestTexture(const GuestTexture& texture) {
         std::scoped_lock lock{mutex};
