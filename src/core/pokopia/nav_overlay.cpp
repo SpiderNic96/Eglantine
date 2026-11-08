@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -191,11 +192,12 @@ public:
     }
 
     /// Text of 5x7 glyphs, `scale` pixels per dot, centred on x, top at y, with a dark outline.
-    void Text(std::string_view text, float cx, float y, int scale, Color color) {
+    void Text(std::string_view text, float cx, float y, int scale, Color color,
+              bool outline = true) {
         const int width = static_cast<int>(text.size()) * 6 * scale - scale;
         const int x0 = static_cast<int>(std::lround(cx)) - width / 2;
         const int y0 = static_cast<int>(std::lround(y));
-        for (int pass = 0; pass < 2; ++pass) {
+        for (int pass = outline ? 0 : 1; pass < 2; ++pass) {
             for (std::size_t i = 0; i < text.size(); ++i) {
                 const auto glyph = Glyph(text[i]);
                 if (!glyph) {
@@ -218,6 +220,60 @@ public:
                 }
             }
         }
+    }
+
+    /// Fills a box with `cover(x, y)` (0..1) of `color`.
+    template <typename F>
+    void Fill(float fx0, float fy0, float fx1, float fy1, Color color, F&& cover) {
+        const int x0 = std::max(0, static_cast<int>(std::floor(fx0)));
+        const int y0 = std::max(0, static_cast<int>(std::floor(fy0)));
+        const int x1 = std::min(W - 1, static_cast<int>(std::ceil(fx1)));
+        const int y1 = std::min(H - 1, static_cast<int>(std::ceil(fy1)));
+        for (int y = y0; y <= y1; ++y) {
+            for (int x = x0; x <= x1; ++x) {
+                const float k = cover(x + 0.5f, y + 0.5f);
+                if (k > 0.f) {
+                    Blend(x, y, color, k);
+                }
+            }
+        }
+    }
+
+    /// Any simple polygon, antialiased: inside by the even-odd rule, edges by distance.
+    void Polygon(std::span<const Vec> points, Color color) {
+        float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+        for (const Vec& p : points) {
+            x0 = std::min(x0, p.x), y0 = std::min(y0, p.y);
+            x1 = std::max(x1, p.x), y1 = std::max(y1, p.y);
+        }
+        Shape(x0 - 1, y0 - 1, x1 + 1, y1 + 1, color, [&](float x, float y) {
+            bool in = false;
+            float edge = 1e9f;
+            for (std::size_t i = 0, j = points.size() - 1; i < points.size(); j = i++) {
+                const Vec a = points[j], b = points[i];
+                if ((b.y > y) != (a.y > y) && x < (a.x - b.x) * (y - b.y) / (a.y - b.y) + b.x) {
+                    in = !in;
+                }
+                const Vec ab = b - a, ap = Vec{x, y} - a;
+                const float t =
+                    std::clamp((ap.x * ab.x + ap.y * ab.y) / std::max(ab.x * ab.x + ab.y * ab.y,
+                                                                      1e-6f),
+                               0.f, 1.f);
+                edge = std::min(edge, Length(ap - ab * t));
+            }
+            return in ? edge : -edge;
+        });
+    }
+
+    void RoundRect(float x0, float y0, float x1, float y1, float r, Color color) {
+        Shape(x0 - 1, y0 - 1, x1 + 1, y1 + 1, color, [&](float x, float y) {
+            const float dx = std::max({x0 + r - x, 0.f, x - (x1 - r)});
+            const float dy = std::max({y0 + r - y, 0.f, y - (y1 - r)});
+            if (dx > 0.f && dy > 0.f) {
+                return r - std::hypot(dx, dy);
+            }
+            return std::min({x - x0, x1 - x, y - y0, y1 - y});
+        });
     }
 
 private:
@@ -244,10 +300,90 @@ void Pointer(Canvas& canvas, Vec at, Vec dir, float len, float half, Color color
     const Vec side = Perp(dir);
     const Vec tip = at + dir * (len * 0.6f);
     const Vec back = at - dir * (len * 0.4f);
-    const float o = 2.5f;
+    const float o = 2.f;
     canvas.Triangle(tip + dir * (o * 1.6f), back - dir * o + side * (half + o * 1.6f),
-                    back - dir * o - side * (half + o * 1.6f), Dark);
+                    back - dir * o - side * (half + o * 1.6f), White);
     canvas.Triangle(tip, back + side * half, back - side * half, color);
+}
+
+constexpr Color PlayerRed{0.92f, 0.18f, 0.22f, 1.f};
+
+/// The player as on the game's map: a soft white view cone where the camera looks, a pink blob
+/// and a red tip in front of it.
+void PlayerMarker(Canvas& c, Vec at, Vec dir) {
+    constexpr float ConeR = 30.f, ConeHalf = 0.6f;
+    c.Fill(at.x - ConeR, at.y - ConeR, at.x + ConeR, at.y + ConeR, Color{1.f, 1.f, 1.f, 0.6f},
+           [&](float x, float y) {
+               const Vec d{x - at.x, y - at.y};
+               const float len = Length(d);
+               if (len < 1.f || len > ConeR) {
+                   return 0.f;
+               }
+               const float angle =
+                   std::acos(std::clamp((d.x * dir.x + d.y * dir.y) / len, -1.f, 1.f));
+               const float edge = std::clamp((ConeHalf - angle) * len + 0.5f, 0.f, 1.f);
+               return edge * (1.f - len / ConeR);
+           });
+    const Vec side = Perp(dir);
+    const Vec tip = at + dir * 12.5f;
+    c.Triangle(tip + dir * 2.f, at + dir * 4.f + side * 6.5f, at + dir * 4.f - side * 6.5f, White);
+    c.Triangle(tip, at + dir * 5.5f + side * 4.5f, at + dir * 5.5f - side * 4.5f, PlayerRed);
+    c.Disc(at + Vec{0.f, 1.f}, 7.5f, Color{0.f, 0.f, 0.f, 0.25f});
+    c.Disc(at, 7.5f, White);
+    c.Disc(at, 6.f, Player);
+}
+
+/// The guide arrow: a bold arrow with a white rim and a soft shadow, in the ping's colour.
+void GuideArrow(Canvas& c, Vec at, Vec dir, Color color) {
+    const Vec side = Perp(dir);
+    const auto arrow = [&](Vec o, float grow, Color fill) {
+        const Vec base = at + o;
+        const float head = 16.f + grow * 1.6f, hw = 6.5f + grow;
+        const std::array<Vec, 7> points{
+            base + dir * (19.f + grow * 1.8f),
+            base + dir * (2.f - grow) + side * head,
+            base + dir * (2.f - grow) + side * hw,
+            base - dir * (15.f + grow) + side * hw,
+            base - dir * (15.f + grow) - side * hw,
+            base + dir * (2.f - grow) - side * hw,
+            base + dir * (2.f - grow) - side * head,
+        };
+        c.Polygon(points, fill);
+    };
+    arrow(Vec{0.f, 3.f}, 3.f, Color{0.f, 0.f, 0.f, 0.3f});
+    arrow(Vec{}, 3.f, White);
+    arrow(Vec{}, 0.f, color);
+}
+
+/// A label in a white rounded pill, centred on x, top at y.
+void Pill(Canvas& c, std::string_view text, float cx, float y) {
+    const float width = static_cast<float>(text.size()) * 12.f + 14.f;
+    c.RoundRect(cx - width * 0.5f, y + 1.5f, cx + width * 0.5f, y + 25.5f, 12.f,
+                Color{0.f, 0.f, 0.f, 0.25f});
+    c.RoundRect(cx - width * 0.5f, y, cx + width * 0.5f, y + 24.f, 12.f,
+                Color{1.f, 1.f, 1.f, 0.95f});
+    c.Text(text, cx, y + 5.f, 2, Color{0.20f, 0.20f, 0.24f, 1.f}, false);
+}
+
+/// A Pokémon: a little Poké Ball.
+void PokemonMarker(Canvas& c, Vec p) {
+    constexpr float R = 4.5f;
+    c.Disc(p, R + 1.3f, Dark);
+    c.Disc(p, R, PlayerRed);
+    c.Fill(p.x - R, p.y, p.x + R, p.y + R, White, [&](float x, float y) {
+        return std::clamp(R + 0.5f - Length(Vec{x, y} - p), 0.f, 1.f) *
+               std::clamp(y - p.y, 0.f, 1.f);
+    });
+    c.Rect(p.x - R, p.y - 0.6f, p.x + R, p.y + 0.6f, Dark);
+    c.Disc(p, 1.6f, Dark);
+    c.Disc(p, 0.9f, White);
+}
+
+/// A point of interest: a rounded badge in its kind's colour.
+void PlaceMarker(Canvas& c, Vec p, Color color) {
+    c.RoundRect(p.x - 6.f, p.y - 5.f, p.x + 6.f, p.y + 7.f, 3.5f, Color{0.f, 0.f, 0.f, 0.3f});
+    c.RoundRect(p.x - 6.f, p.y - 6.f, p.x + 6.f, p.y + 6.f, 3.5f, White);
+    c.RoundRect(p.x - 4.3f, p.y - 4.3f, p.x + 4.3f, p.y + 4.3f, 2.2f, color);
 }
 
 std::string Distance(float units) {
@@ -401,34 +537,52 @@ void RequestRedraw(Core::System& system, bool mark_changed, bool first) {
 struct IconSite {
     u64 site;      // ldp s2, s3, [xN, #0xa8]: the map's centre, about to be subtracted
     u8 x_reg, z_reg;
+    u8 id_reg;     // the icon's id in a w register there, or NoIdReg
 };
+constexpr u8 NoIdReg = 0xFF;
 constexpr std::array<IconSite, 6> IconSites{{
-    {0xf64034, 9, 10},
-    {0xf65174, 13, 14},
-    {0xf65b40, 8, 9},
-    {0xf65ec8, 9, 10},
-    {0xf668c8, 9, 10},
-    {0xf66e58, 12, 13},
+    {0xf64034, 9, 10, NoIdReg},
+    {0xf65174, 13, 14, NoIdReg},
+    {0xf65b40, 8, 9, NoIdReg},
+    {0xf65ec8, 9, 10, NoIdReg},
+    {0xf668c8, 9, 10, 20}, // main+0xf667f4: facilities, their icon id the third argument
+    {0xf66e58, 12, 13, NoIdReg},
 }};
-// ldp x21, x20, [x0] after a Pokémon's position getter: x0 is the position, [sp + 0xc] its id.
+// ldp x21, x20, [x0] after a Pokémon's position getter: x0 is the position, [sp + 0xc] its id,
+// w19 its kind. One instruction before (ldr x8, [x8, #0x10]) x0 is the component the getter
+// belongs to (diagnostics: for following Pokémon without the menu).
 constexpr std::array<u64, 2> PokemonSites{0xf65798, 0xf65a58};
+constexpr std::array<u64, 2> PokemonComponentSites{0xf65790, 0xf65a50};
+// The area's list of Pokémon ids the menu goes through: [[main+0x3483bd0]] +0x2b8 (u16 ids),
+// count +0x2c4.
+constexpr u64 PokemonListGlobal = 0x3483bd0;
 constexpr std::array<Color, IconSites.size()> IconColors{{
     {0.90f, 0.20f, 0.20f, 1.f}, // red
     {0.20f, 0.45f, 0.95f, 1.f}, // blue
     {1.00f, 0.55f, 0.10f, 1.f}, // orange
     {0.65f, 0.30f, 0.90f, 1.f}, // purple
-    {0.10f, 0.80f, 0.85f, 1.f}, // cyan
+    {0.10f, 0.75f, 0.85f, 1.f}, // cyan
     {0.20f, 0.75f, 0.25f, 1.f}, // green
 }};
-constexpr Color PokemonColor{1.f, 0.85f, 0.15f, 1.f};
+// Facilities by icon id (main+0xf64700..0xf64a74 pass 0x14d..0x150; others come from data).
+constexpr std::array<Color, 6> FacilityColors{{
+    {0.10f, 0.75f, 0.85f, 1.f}, // cyan
+    {0.95f, 0.35f, 0.30f, 1.f}, // red
+    {0.98f, 0.70f, 0.15f, 1.f}, // amber
+    {0.45f, 0.40f, 0.95f, 1.f}, // indigo
+    {0.30f, 0.80f, 0.40f, 1.f}, // green
+    {0.90f, 0.40f, 0.80f, 1.f}, // pink
+}};
 
 struct Icon {
     float x, z;
     u8 kind;
+    u16 id;
     u32 pass;
 };
 struct TrackedPokemon {
     u64 position;
+    u32 species;
     u32 pass;
 };
 std::mutex g_icon_mutex;
@@ -437,6 +591,9 @@ std::unordered_map<u16, TrackedPokemon> g_pokemon;
 u32 g_pass = 0; // one per time the menu placed its icons
 std::chrono::steady_clock::time_point g_last_icon{}, g_pass_start{};
 std::array<u32, IconSites.size() + 1> g_icon_logged{};
+std::vector<std::pair<u8, u16>> g_logged_ids;
+thread_local u64 t_component = 0;
+u32 g_component_logged = 0;
 
 /// An icon was placed: a new pass when the last one was a while ago (the menu opened again).
 void TouchPass() {
@@ -459,30 +616,62 @@ void OnIconPlaced(Core::System&, Kernel::Svc::ThreadContext& ctx) {
     if (!std::isfinite(x) || !std::isfinite(z)) {
         return;
     }
+    const u16 id = IconSites[I].id_reg == NoIdReg
+                       ? 0xFFFF
+                       : static_cast<u16>(ctx.r[IconSites[I].id_reg]);
     std::scoped_lock lock{g_icon_mutex};
     TouchPass();
-    if (g_icon_logged[I]++ < 3) {
-        LOG_INFO(Loader, "Pokopia minimap: icon kind {} at {:.0f} {:.0f}", I, x, z);
+    const std::pair<u8, u16> key{static_cast<u8>(I), id};
+    if (g_logged_ids.size() < 64 && std::ranges::find(g_logged_ids, key) == g_logged_ids.end()) {
+        g_logged_ids.push_back(key);
+        LOG_INFO(Loader, "Pokopia minimap: icon kind {} id {:#x} at {:.0f} {:.0f}", I, id, x, z);
     }
     for (Icon& icon : g_icons) {
         if (icon.kind == I && std::abs(icon.x - x) < 1.f && std::abs(icon.z - z) < 1.f) {
+            icon.id = id;
             icon.pass = g_pass;
             return;
         }
     }
     if (g_icons.size() < 1024) {
-        g_icons.push_back({x, z, static_cast<u8>(I), g_pass});
+        g_icons.push_back({x, z, static_cast<u8>(I), id, g_pass});
     }
 }
 
+void OnPokemonComponent(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    t_component = ctx.r[0];
+}
+
 void OnPokemonPlaced(Core::System& system, Kernel::Svc::ThreadContext& ctx) {
-    const u16 id = system.ApplicationMemory().Read16(ctx.sp + 0xc);
+    auto& memory = system.ApplicationMemory();
+    const u16 id = memory.Read16(ctx.sp + 0xc);
+    const u32 species = static_cast<u32>(ctx.r[19]);
+    const u64 component = t_component;
     std::scoped_lock lock{g_icon_mutex};
     TouchPass();
     if (g_icon_logged.back()++ < 3) {
-        LOG_INFO(Loader, "Pokopia minimap: Pokémon {} with its position at {:#x}", id, ctx.r[0]);
+        LOG_INFO(Loader, "Pokopia minimap: Pokémon {} (kind {:#x}) with its position at {:#x}",
+                 id, species, ctx.r[0]);
     }
-    g_pokemon[id] = TrackedPokemon{ctx.r[0], g_pass};
+    if (g_component_logged < 4 && Valid(memory, component)) {
+        // How a Pokémon's position follows from its component: for following them live without
+        // the menu (the getter is component's virtual function at +0x10).
+        ++g_component_logged;
+        const u64 vtable = memory.Read64(component);
+        const u64 getter = Valid(memory, vtable + 0x10) ? memory.Read64(vtable + 0x10) : 0;
+        u32 code[4]{};
+        if (Valid(memory, getter, 16)) {
+            for (int i = 0; i < 4; ++i) {
+                code[i] = memory.Read32(getter + i * 4);
+            }
+        }
+        LOG_INFO(Loader,
+                 "Pokopia minimap: Pokémon {} component {:#x} (position at +{:#x}), vtable "
+                 "main+{:#x}, getter main+{:#x}: {:08x} {:08x} {:08x} {:08x}",
+                 id, component, ctx.r[0] - component, vtable - g_main_base, getter - g_main_base,
+                 code[0], code[1], code[2], code[3]);
+    }
+    g_pokemon[id] = TrackedPokemon{ctx.r[0], species, g_pass};
 }
 
 template <std::size_t... I>
@@ -497,22 +686,55 @@ void ClearIcons() {
 }
 
 struct MapMarks {
-    std::vector<std::pair<Vec, u8>> icons; // world x, z; kind
+    std::vector<std::pair<Vec, Color>> places; // world x, z; colour
     std::vector<Vec> pokemon;
 };
+
+/// The ids in the area's Pokémon list, or nullopt if it cannot be read.
+std::optional<std::vector<u16>> PokemonInArea(Core::Memory::Memory& memory) {
+    if (!Valid(memory, g_main_base + PokemonListGlobal)) {
+        return std::nullopt;
+    }
+    const u64 global = memory.Read64(g_main_base + PokemonListGlobal);
+    if (!Valid(memory, global)) {
+        return std::nullopt;
+    }
+    const u64 list = memory.Read64(global);
+    if (!Valid(memory, list + 0x2b8, 0x10)) {
+        return std::nullopt;
+    }
+    const u64 ids = memory.Read64(list + 0x2b8);
+    const s32 count = static_cast<s32>(memory.Read32(list + 0x2c4));
+    if (count <= 0 || count > 4096 || !Valid(memory, ids, static_cast<u64>(count) * 2)) {
+        return std::nullopt;
+    }
+    std::vector<u16> out(static_cast<std::size_t>(count));
+    for (s32 i = 0; i < count; ++i) {
+        out[i] = memory.Read16(ids + static_cast<u64>(i) * 2);
+    }
+    return out;
+}
 
 /// What the menu last showed, with the Pokémon where they are now.
 MapMarks CollectMarks(Core::System& system) {
     MapMarks marks;
     auto& memory = system.ApplicationMemory();
+    const auto in_area = PokemonInArea(memory);
     std::scoped_lock lock{g_icon_mutex};
-    // Once a new pass has had time to place everything, drop what it no longer showed.
+    // Once a new pass has had time to place everything, drop places it no longer showed.
     if (std::chrono::steady_clock::now() - g_pass_start > std::chrono::milliseconds(500)) {
         std::erase_if(g_icons, [](const Icon& icon) { return icon.pass < g_pass; });
-        std::erase_if(g_pokemon, [](const auto& entry) { return entry.second.pass < g_pass; });
+    }
+    // Pokémon stay while the game lists them in the area (they are followed live).
+    if (in_area) {
+        std::erase_if(g_pokemon, [&](const auto& entry) {
+            return std::ranges::find(*in_area, entry.first) == in_area->end();
+        });
     }
     for (const Icon& icon : g_icons) {
-        marks.icons.push_back({Vec{icon.x, icon.z}, icon.kind});
+        const Color color = icon.id != 0xFFFF ? FacilityColors[icon.id % FacilityColors.size()]
+                                              : IconColors[icon.kind];
+        marks.places.push_back({Vec{icon.x, icon.z}, color});
     }
     for (const auto& [id, tracked] : g_pokemon) {
         if (!Valid(memory, tracked.position, 12)) {
@@ -558,11 +780,21 @@ struct PanelView {
     }
 };
 
+/// The ping on a map: a pin whose point is the spot.
+void PinMarker(Canvas& c, Vec p) {
+    const Vec head{p.x, p.y - 11.f};
+    c.Disc(Vec{p.x, p.y + 0.5f}, 2.5f, Color{0.f, 0.f, 0.f, 0.3f});
+    c.Triangle(p + Vec{0.f, 2.f}, head + Vec{-7.5f, 1.f}, head + Vec{7.5f, 1.f}, White);
+    c.Disc(head, 8.f, White);
+    c.Triangle(p, head + Vec{-5.5f, 1.f}, head + Vec{5.5f, 1.f}, Ping);
+    c.Disc(head, 6.f, Ping);
+    c.Disc(head, 2.4f, White);
+}
+
 void DrawPing(Canvas& c, Vec at, Vec centre, float limit_x0, float limit_y0, float limit_x1,
               float limit_y1) {
     if (at.x >= limit_x0 && at.x <= limit_x1 && at.y >= limit_y0 && at.y <= limit_y1) {
-        c.Disc(at, 6.5f, Dark);
-        c.Disc(at, 5.f, Ping);
+        PinMarker(c, at);
         return;
     }
     // Off the panel: a pointer on its edge, towards the ping.
@@ -591,25 +823,23 @@ void Draw(State& s, const CameraInfo& cam, Vec forward, const PanelView& view,
         const auto inside = [x1, y1](Vec p) {
             return p.x > PanelX0 + 2.f && p.x < x1 - 2.f && p.y > PanelY0 + 2.f && p.y < y1 - 2.f;
         };
-        for (const auto& [where, kind] : marks.icons) {
+        for (const auto& [where, color] : marks.places) {
             const Vec p = view.ToPanel(where.x, where.y);
             if (inside(p) && Length(p - at) > 4.f) {
-                c.Rect(p.x - 4.f, p.y - 4.f, p.x + 4.f, p.y + 4.f, Dark);
-                c.Rect(p.x - 2.8f, p.y - 2.8f, p.x + 2.8f, p.y + 2.8f, IconColors[kind]);
+                PlaceMarker(c, p, color);
             }
         }
         for (const Vec& where : marks.pokemon) {
             const Vec p = view.ToPanel(where.x, where.y);
             if (inside(p)) {
-                c.Disc(p, 4.f, Dark);
-                c.Disc(p, 2.8f, PokemonColor);
+                PokemonMarker(c, p);
             }
         }
         if (s.ping) {
             DrawPing(c, view.ToPanel(s.ping_x, s.ping_z), at, PanelX0 + 6.f, PanelY0 + 6.f,
                      x1 - 6.f, y1 - 6.f);
         }
-        Pointer(c, at, forward, 18.f, 7.f, Player);
+        PlayerMarker(c, at, forward);
     } else {
         // Radar, north up as the game's map: world +x right, +z down.
         const Vec centre{RadarX, RadarY};
@@ -624,11 +854,10 @@ void Draw(State& s, const CameraInfo& cam, Vec forward, const PanelView& view,
                 const Vec dir = rel * (1.f / len);
                 Pointer(c, centre + dir * (RadarR - 8.f), dir, 13.f, 5.f, Ping);
             } else {
-                c.Disc(centre + rel, 6.5f, Dark);
-                c.Disc(centre + rel, 5.f, Ping);
+                PinMarker(c, centre + rel);
             }
         }
-        Pointer(c, centre, forward, 18.f, 7.f, Player);
+        PlayerMarker(c, centre, forward);
     }
 
     if (!s.ping) {
@@ -642,7 +871,7 @@ void Draw(State& s, const CameraInfo& cam, Vec forward, const PanelView& view,
         const float pulse = 0.5f + 0.5f * std::sin(static_cast<float>(s.frame) * 0.15f);
         c.Ring(arrow, 14.f + pulse * 4.f, 4.f, Dark);
         c.Ring(arrow, 14.f + pulse * 4.f, 2.5f, Ping);
-        c.Text("HERE", ArrowX, ArrowY + 26.f, 2, White);
+        Pill(c, "HERE", ArrowX, ArrowY + 26.f);
         return;
     }
     const Vec right{-forward.y, forward.x};
@@ -650,8 +879,8 @@ void Draw(State& s, const CameraInfo& cam, Vec forward, const PanelView& view,
     const float across = to_ping.x * right.x + to_ping.y * right.y;
     Vec screen{across, -ahead};
     screen = screen * (1.f / std::max(Length(screen), 1e-4f));
-    Pointer(c, arrow, screen, 34.f, 13.f, Ping);
-    c.Text(Distance(dist), ArrowX, ArrowY + 26.f, 2, White);
+    GuideArrow(c, arrow, screen, Ping);
+    Pill(c, Distance(dist), ArrowX, ArrowY + 28.f);
 }
 
 PanelView MapView(const CameraInfo& cam) {
@@ -775,7 +1004,7 @@ void Tick() {
     for (const Vec& p : marks.pokemon) {
         signature = signature * 1099511628211ULL ^ (q(p.x, 16.f) * 2654435761ULL ^ q(p.y, 16.f));
     }
-    signature ^= static_cast<u64>(marks.icons.size()) << 48;
+    signature ^= static_cast<u64>(marks.places.size()) << 48;
     const bool arrived = s.ping && std::hypot(s.ping_x - cam.target[0],
                                               s.ping_z - cam.target[2]) < ArriveRange;
     if (signature == s.last_signature && !arrived && s.shown) {
@@ -839,9 +1068,14 @@ void InstallNavOverlay(Core::System& system, HookInstaller& hooks, u64 main_base
     }
     ClearIcons();
     g_icon_logged = {};
+    g_logged_ids.clear();
+    g_component_logged = 0;
     AddIconHooks(hooks, std::make_index_sequence<IconSites.size()>{});
     for (const u64 site : PokemonSites) {
         hooks.Add(site, &OnPokemonPlaced, "minimap Pokémon");
+    }
+    for (const u64 site : PokemonComponentSites) {
+        hooks.Add(site, &OnPokemonComponent, "minimap Pokémon component");
     }
 
     auto& timing = system.CoreTiming();
