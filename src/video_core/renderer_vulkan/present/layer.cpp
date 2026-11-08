@@ -99,11 +99,14 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
             ? std::nullopt
             : rasterizer.AccelerateDisplay(framebuffer, framebuffer.address + framebuffer.offset,
                                            framebuffer.stride);
-    const u32 texture_width = texture_info ? texture_info->width : framebuffer.width;
-    const u32 texture_height = texture_info ? texture_info->height : framebuffer.height;
-    const u32 scaled_width = texture_info ? texture_info->scaled_width : texture_width;
-    const u32 scaled_height = texture_info ? texture_info->scaled_height : texture_height;
-    const bool use_accelerated = texture_info.has_value();
+    // A find_by_size layer draws its own copy (raw images), of the framebuffer's size.
+    const bool own_copy = framebuffer.find_by_size;
+    const bool from_cache = texture_info.has_value() && !own_copy;
+    const u32 texture_width = from_cache ? texture_info->width : framebuffer.width;
+    const u32 texture_height = from_cache ? texture_info->height : framebuffer.height;
+    const u32 scaled_width = from_cache ? texture_info->scaled_width : texture_width;
+    const u32 scaled_height = from_cache ? texture_info->scaled_height : texture_height;
+    bool use_accelerated = texture_info.has_value();
     const bool is_applet =
         (framebuffer.layer_stack_mask & Service::Nvnflinger::LayerStackBit(
                                             Service::Nvnflinger::LayerStackId::Recording)) == 0;
@@ -126,10 +129,28 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
     if (!use_accelerated && !framebuffer.dest_rect) {
         UpdateRawImage(framebuffer, image_index);
     }
+    if (own_copy) {
+        if (copy_generation.size() != image_count) {
+            copy_generation.assign(image_count, 0);
+            latest_copy_generation = 0;
+        }
+        if (texture_info) {
+            CopyIntoRawImage(texture_info->image, texture_info->scaled_width,
+                             texture_info->scaled_height, image_index);
+            copy_generation[image_index] = ++latest_copy_generation;
+            latest_copy_index = image_index;
+        } else if (latest_copy_generation != 0 &&
+                   copy_generation[image_index] < latest_copy_generation &&
+                   latest_copy_index != image_index) {
+            CopyIntoRawImage(*raw_images[latest_copy_index], raw_width, raw_height, image_index);
+            copy_generation[image_index] = latest_copy_generation;
+        }
+        use_accelerated = copy_generation[image_index] != 0;
+    }
 
-    VkImage source_image = texture_info ? texture_info->image : *raw_images[image_index];
+    VkImage source_image = from_cache ? texture_info->image : *raw_images[image_index];
     VkImageView source_image_view =
-        texture_info ? texture_info->image_view : *raw_image_views[image_index];
+        from_cache ? texture_info->image_view : *raw_image_views[image_index];
 
     if (auto* fxaa = std::get_if<FXAA>(&anti_alias)) {
         fxaa->Draw(device, scheduler, image_index, &source_image, &source_image_view);
@@ -237,6 +258,8 @@ void Layer::RefreshResources(const Device& device, const Tegra::FramebufferConfi
     anti_alias.emplace<std::monostate>();
 
     ReleaseRawImages();
+    copy_generation.clear();
+    latest_copy_generation = 0;
     CreateStagingBuffer(device, framebuffer);
     CreateRawImages(device, framebuffer);
 }
@@ -362,6 +385,51 @@ void Layer::UpdateDescriptorSet(const Device& device, VkImageView image_view, Vk
     };
 
     device.GetLogical().UpdateDescriptorSets(std::array{sampler_write}, {});
+}
+
+void Layer::CopyIntoRawImage(VkImage src, u32 src_width, u32 src_height, size_t image_index) {
+    const bool first = copy_generation[image_index] == 0;
+    const VkImageBlit region{
+        .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+        .srcOffsets = {{0, 0, 0}, {static_cast<s32>(src_width), static_cast<s32>(src_height), 1}},
+        .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+        .dstOffsets = {{0, 0, 0}, {static_cast<s32>(raw_width), static_cast<s32>(raw_height), 1}},
+    };
+    scheduler.Record([this, src, region, first, index = image_index](vk::CommandBuffer cmdbuf) {
+        const VkImage dst = *raw_images[index];
+        const VkMemoryBarrier before{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+        };
+        const VkImageMemoryBarrier dst_barrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout = first ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL,
+            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = dst,
+            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+        };
+        cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                               0, before, {}, dst_barrier);
+        cmdbuf.BlitImage(src, VK_IMAGE_LAYOUT_GENERAL, dst, VK_IMAGE_LAYOUT_GENERAL, region,
+                         VK_FILTER_LINEAR);
+        const VkMemoryBarrier after{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT,
+        };
+        cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                               VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                                   VK_PIPELINE_STAGE_TRANSFER_BIT,
+                               0, after);
+    });
 }
 
 void Layer::UpdateRawImage(const Tegra::FramebufferConfig& framebuffer, size_t image_index) {

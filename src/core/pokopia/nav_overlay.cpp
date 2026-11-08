@@ -353,7 +353,7 @@ void OnMinimapRender(Core::System& system, Kernel::Svc::ThreadContext& ctx) {
 
 /// Asks the game to redraw its minimap (it does only if something changed); the first time also
 /// marks it changed, for the first picture.
-void RequestRedraw(Core::System& system, bool first) {
+void RequestRedraw(Core::System& system, bool mark_changed, bool first) {
     auto& memory = system.ApplicationMemory();
     if (!Valid(memory, g_main_base + MinimapOwner)) {
         return;
@@ -372,6 +372,8 @@ void RequestRedraw(Core::System& system, bool first) {
     }
     if (first) {
         LOG_INFO(Loader, "Pokopia minimap: map fields at {:#x}, asking for redraws", fields);
+    }
+    if (mark_changed) {
         memory.Write8(fields + MinimapDirty, 1);
     }
     memory.Write8(fields + MinimapRequest, 1);
@@ -385,6 +387,7 @@ struct State {
     u64 last_signature = ~u64{0};
     u32 frame = 0;
     bool requested_once = false;
+    bool mark_changed = true; // back in play: have the map redrawn even if nothing changed
 };
 
 State& St() {
@@ -526,8 +529,17 @@ PanelView MapView(const CameraInfo& cam) {
     return view;
 }
 
+Common::HostOverlay::GuestTexture HiddenTexture() {
+    // Keeps its size: a change of size rebuilds the renderer's copy of the map.
+    Common::HostOverlay::GuestTexture texture{};
+    texture.width = TextureSize;
+    texture.height = TextureSize;
+    return texture;
+}
+
 void Hide(State& s) {
-    Common::GetHostOverlay().SetGuestTexture({});
+    Common::GetHostOverlay().SetGuestTexture(HiddenTexture());
+    s.mark_changed = true;
     if (s.shown) {
         s.canvas.Clear();
         Common::GetHostOverlay().Publish(s.canvas.px);
@@ -567,9 +579,10 @@ void Tick() {
     if (!overlay.Enabled()) {
         overlay.SetEnabled(true);
     }
-    if (s.frame % RequestEveryTicks == 0) {
-        RequestRedraw(*g_system, !s.requested_once);
+    if (s.mark_changed || s.frame % RequestEveryTicks == 0) {
+        RequestRedraw(*g_system, s.mark_changed, !s.requested_once);
         s.requested_once = true;
+        s.mark_changed = false;
     }
 
     Vec forward{cam.target[0] - cam.eye[0], cam.target[2] - cam.eye[2]};
@@ -608,10 +621,11 @@ void InstallNavOverlay(Core::System& system, HookInstaller& hooks, u64 main_base
     s.shown = false;
     s.ping = false;
     s.requested_once = false;
+    s.mark_changed = true;
     s.last_signature = ~u64{0};
     s.canvas.Clear();
     Common::GetHostOverlay().Publish(s.canvas.px);
-    Common::GetHostOverlay().SetGuestTexture({});
+    Common::GetHostOverlay().SetGuestTexture(HiddenTexture());
 
     if (!hooks.AddInline(MinimapRenderSite, &OnMinimapRender, "minimap redraw")) {
         LOG_WARNING(Loader, "Pokopia navigation overlay: no live map (radar only)");

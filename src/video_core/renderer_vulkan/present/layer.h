@@ -82,6 +82,9 @@ private:
     void SetVertexData(const Device& device, PresentPushConstants& data, const Layout::FramebufferLayout& layout, const Common::Rectangle<f32>& crop) const;
     void UpdateDescriptorSet(const Device& device, VkImageView image_view, VkSampler sampler, size_t image_index);
     void UpdateRawImage(const Tegra::FramebufferConfig& framebuffer, size_t image_index);
+    /// find_by_size layers keep their own copy of the game's render target (which the texture
+    /// cache may drop between the game's redraws): blits `src` into raw image `image_index`.
+    void CopyIntoRawImage(VkImage src, u32 src_width, u32 src_height, size_t image_index);
 
 private:
     MemoryAllocator& memory_allocator;
@@ -97,6 +100,9 @@ private:
     std::vector<vk::ImageView> raw_image_views{};
     u32 raw_width{};
     u32 raw_height{};
+    std::vector<u64> copy_generation{}; ///< per raw image: which copy it holds (0: none)
+    u64 latest_copy_generation{};
+    size_t latest_copy_index{};
     Service::android::PixelFormat pixel_format{};
 
     Settings::AntiAliasing anti_alias_setting{};

@@ -1610,7 +1610,9 @@ std::pair<typename P::ImageView*, bool> TextureCache<P>::FindRenderTargetBySize(
         }
     }
     static u32 last_matches = ~0U;
-    if (matches != last_matches) {
+    static u32 logged = 0;
+    if (matches != last_matches && logged < 12) {
+        ++logged;
         last_matches = matches;
         LOG_INFO(HW_GPU, "Render targets of {}x{} RGBA8: {}{}", width, height, matches,
                  best ? fmt::format(", newest at gpu {:#x}", slot_images[best].gpu_addr) : "");
