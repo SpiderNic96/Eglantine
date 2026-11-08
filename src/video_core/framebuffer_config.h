@@ -48,6 +48,8 @@ struct FramebufferConfig {
     /// Shown only in this part of the screen (0..1: left, top, right, bottom), without filters,
     /// and only if the texture cache holds the image (no guest-memory fallback).
     std::optional<std::array<float, 4>> dest_rect{};
+    /// Not at `address`: the newest RGBA8 render target of width x height (texture cache).
+    bool find_by_size{};
 };
 
 Common::Rectangle<f32> NormalizeCrop(const FramebufferConfig& framebuffer, u32 texture_width,

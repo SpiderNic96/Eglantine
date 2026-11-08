@@ -309,6 +309,10 @@ public:
     [[nodiscard]] std::pair<ImageView*, bool> TryFindFramebufferImageView(
         const Tegra::FramebufferConfig& config, DAddr cpu_addr);
 
+    /// The most recently GPU-written 2D RGBA8 image of this size (one level, one layer), for game
+    /// mods that show one of the game's render targets elsewhere (alpha read as one).
+    [[nodiscard]] std::pair<ImageView*, bool> FindRenderTargetBySize(u32 width, u32 height);
+
     /// Return true when there are uncommitted images to be downloaded
     [[nodiscard]] bool HasUncommittedFlushes() const noexcept;
 

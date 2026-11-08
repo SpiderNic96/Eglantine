@@ -1589,6 +1589,45 @@ std::pair<typename P::ImageView*, bool> TextureCache<P>::TryFindFramebufferImage
 }
 
 template <class P>
+std::pair<typename P::ImageView*, bool> TextureCache<P>::FindRenderTargetBySize(u32 width,
+                                                                               u32 height) {
+    ImageId best{};
+    u64 best_tick = 0;
+    u32 matches = 0;
+    for (const auto [image_id, image] : slot_images) {
+        const auto& info = image->info;
+        if (info.type != ImageType::e2D || info.size.width != width ||
+            info.size.height != height || info.size.depth != 1 || info.resources.levels != 1 ||
+            info.resources.layers != 1 || info.num_samples != 1 ||
+            info.format != PixelFormat::A8B8G8R8_UNORM || image->modification_tick == 0 ||
+            True(image->flags & (ImageFlagBits::Sparse | ImageFlagBits::Unbacked))) {
+            continue;
+        }
+        ++matches;
+        if (image->modification_tick > best_tick) {
+            best_tick = image->modification_tick;
+            best = image_id;
+        }
+    }
+    static u32 last_matches = ~0U;
+    if (matches != last_matches) {
+        last_matches = matches;
+        LOG_INFO(HW_GPU, "Render targets of {}x{} RGBA8: {}{}", width, height, matches,
+                 best ? fmt::format(", newest at gpu {:#x}", slot_images[best].gpu_addr) : "");
+    }
+    if (!best) {
+        return {};
+    }
+    ImageViewInfo view_info{ImageViewType::e2D, PixelFormat::A8B8G8R8_UNORM};
+    view_info.x_source = static_cast<u8>(SwizzleSource::R);
+    view_info.y_source = static_cast<u8>(SwizzleSource::G);
+    view_info.z_source = static_cast<u8>(SwizzleSource::B);
+    view_info.w_source = static_cast<u8>(SwizzleSource::OneFloat);
+    return {&slot_image_views[FindOrEmplaceImageView(best, view_info)],
+            slot_images[best].IsRescaled()};
+}
+
+template <class P>
 bool TextureCache<P>::HasUncommittedFlushes() const noexcept {
     return !uncommitted_downloads.empty();
 }

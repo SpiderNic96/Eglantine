@@ -315,8 +315,17 @@ void FindTexture(Core::System& system, u64 fields) {
         }
     }
     if (g_map.address == 0) {
-        LOG_WARNING(Loader, "Pokopia minimap: texture {:#x} (nvn {:#x}) has no GPU address I know",
-                    texture, nvn);
+        LOG_INFO(Loader,
+                 "Pokopia minimap: texture {:#x} (nvn {:#x}): no GPU address in it I know; the "
+                 "renderer looks for the texture by its size",
+                 texture, nvn);
+        if (Valid(memory, nvn, 0xC0)) {
+            for (u64 offset = 0; offset < 0xC0; offset += 0x20) {
+                LOG_INFO(Loader, "Pokopia minimap: nvn+{:02x}: {:016x} {:016x} {:016x} {:016x}",
+                         offset, memory.Read64(nvn + offset), memory.Read64(nvn + offset + 8),
+                         memory.Read64(nvn + offset + 16), memory.Read64(nvn + offset + 24));
+            }
+        }
     } else {
         LOG_INFO(Loader, "Pokopia minimap: texture at device {:#x}", g_map.address);
     }
@@ -482,7 +491,7 @@ PanelView MapView(const CameraInfo& cam) {
         std::scoped_lock lock{g_map_mutex};
         map = g_map;
     }
-    if (!map.drawn || map.address == 0) {
+    if (!map.drawn) {
         return view;
     }
     view.live = true;

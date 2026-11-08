@@ -1830,12 +1830,14 @@ void RasterizerVulkan::AccelerateInlineToMemory(GPUVAddr address, size_t copy_si
 
 std::optional<FramebufferTextureInfo> RasterizerVulkan::AccelerateDisplay(
     const Tegra::FramebufferConfig& config, DAddr framebuffer_addr, u32 pixel_stride) {
-    if (!framebuffer_addr) {
+    if (!framebuffer_addr && !config.find_by_size) {
         return {};
     }
     std::scoped_lock lock{texture_cache.mutex};
     const auto [image_view, scaled] =
-        texture_cache.TryFindFramebufferImageView(config, framebuffer_addr);
+        config.find_by_size
+            ? texture_cache.FindRenderTargetBySize(config.width, config.height)
+            : texture_cache.TryFindFramebufferImageView(config, framebuffer_addr);
     static u32 display_trace_count{};
     static const bool frame_capture = std::getenv("EDEN_NATIVE_FRAME_CAPTURE") != nullptr;
     if (frame_capture && display_trace_count++ < 64) {

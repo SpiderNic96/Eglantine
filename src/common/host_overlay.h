@@ -50,7 +50,8 @@ public:
     /// A texture the game itself rendered, shown in a part of the screen under the overlay.
     struct GuestTexture {
         bool visible = false;
-        u64 address = 0;            ///< device address of the image (texture cache)
+        u64 address = 0;            ///< device address of the image; 0: the newest RGBA8
+                                    ///< render target of width x height
         u32 width = 0, height = 0;  ///< the image's size in texels
         float crop[4]{};            ///< texels shown: left, top, right, bottom (top > bottom flips)
         float dest[4]{};            ///< where on the game's picture, 0..1: left, top, right, bottom
