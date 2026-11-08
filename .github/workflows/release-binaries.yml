@@ -7,6 +7,10 @@ on:
         description: Publish the binaries as a GitHub release
         type: boolean
         default: true
+      platforms:
+        description: "Platforms to build: all, or some of windows-x86_64, linux-x86_64, linux-aarch64, macos-arm64, android-arm64 (comma-separated)"
+        type: string
+        default: all
   # SpiderNic96's fork: builds the Joy-Con 2 mouse branch (jc2-mouse-recompia-fixes plus this file)
   # for every platform. Merge jc2-mouse-recompia-fixes in and push to rebuild.
   push:
@@ -50,8 +54,49 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Which platforms this run builds: all of them on a push, the chosen ones when started by hand
+  # (inputs.platforms), so one platform can be rebuilt without the others.
+  plan:
+    name: Choose platforms
+    runs-on: ubuntu-24.04
+    outputs:
+      desktop: ${{ steps.plan.outputs.desktop }}
+      android: ${{ steps.plan.outputs.android }}
+    steps:
+      - name: Choose platforms
+        id: plan
+        shell: bash
+        env:
+          PLATFORMS: ${{ github.event_name == 'workflow_dispatch' && inputs.platforms || 'all' }}
+        run: |
+          set -euo pipefail
+          all='[
+            {"platform": "linux-x86_64", "runner": "ubuntu-24.04", "preset": "v3"},
+            {"platform": "windows-x86_64", "runner": "windows-2022", "preset": "v3"},
+            {"platform": "linux-aarch64", "runner": "ubuntu-24.04-arm", "preset": "custom"},
+            {"platform": "macos-arm64", "runner": "macos-15", "preset": "custom"}
+          ]'
+          wanted=$(tr -d ' ' <<< "${PLATFORMS:-all}")
+          if [ "$wanted" = all ] || [ -z "$wanted" ]; then
+            desktop=$(jq -c . <<< "$all")
+            android=true
+          else
+            desktop=$(jq -c --arg w ",$wanted," '[.[] | select($w | contains("," + .platform + ","))]' <<< "$all")
+            android=false
+            [[ ",$wanted," == *,android-arm64,* ]] && android=true
+          fi
+          if [ "$desktop" = "[]" ]; then
+            # A matrix may not be empty: a placeholder entry that every build step skips.
+            desktop='[{"platform": "none", "runner": "ubuntu-24.04", "preset": "custom"}]'
+          fi
+          echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
+          echo "android=$android" >> "$GITHUB_OUTPUT"
+          echo "Desktop: $desktop; Android: $android"
+
   build:
     name: ${{ matrix.platform }} binary
+    needs: plan
+    if: ${{ !contains(needs.plan.outputs.desktop, '"none"') }}
     runs-on: ${{ matrix.runner }}
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -80,19 +125,7 @@ jobs:
         # This fork has no boat.dev runner, so x86_64 Linux builds on GitHub's: linux-deps.sh and
         # install-qt-action set it up from scratch. macOS (from upstream Djihads80/Eglantine) uses
         # Homebrew's libraries and Apple clang, which cannot read the LLVM profile: no PGO there.
-        include:
-          - platform: linux-x86_64
-            runner: ubuntu-24.04
-            preset: v3
-          - platform: windows-x86_64
-            runner: windows-2022
-            preset: v3
-          - platform: linux-aarch64
-            runner: ubuntu-24.04-arm
-            preset: custom
-          - platform: macos-arm64
-            runner: macos-15
-            preset: custom
+        include: ${{ fromJSON(needs.plan.outputs.desktop) }}
 
     steps:
       - name: Check out source
@@ -167,6 +200,9 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
+          # The runner's own MSYS2 (C:\msys64), updated with pacman: no installer download from
+          # GitHub, which failed whenever GitHub's release downloads did.
+          release: false
           update: true
           cache: true
           install: >-
@@ -550,6 +586,8 @@ jobs:
   # alongside nothing else signed by a different key under the same app id.
   android:
     name: android-arm64 APK
+    needs: plan
+    if: ${{ needs.plan.outputs.android == 'true' }}
     runs-on: ubuntu-24.04
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache

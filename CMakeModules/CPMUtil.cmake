@@ -1043,18 +1043,27 @@ function(AddCIPackage)
             set(EXTRA_ARGS MODULE_PATH)
         endif()
 
-        # download sha512sum file
-        # TODO: CI pkgs
-        set(sha512sum_url
-            "https://${ARTIFACT_GIT_HOST}/${ARTIFACT_REPO}/releases/download/${ARTIFACT_VERSION}/${ARTIFACT}.sha512sum")
-        set(sha512sum_file
-            "${CMAKE_CURRENT_BINARY_DIR}/.cpmutil_${ARTIFACT}_sha512sum")
+        # A package already in the CPM cache is not fetched again, so it needs no hash: skip the
+        # download of its sha512sum (a GitHub release download, which fails when GitHub's do).
+        get_cache_path(${ARTIFACT_PACKAGE} "${ARTIFACT_VERSION}-${pkgname}" ci_cache_path)
+        compute_patch_key("" ci_patch_key)
+        needs_refetch("${ci_cache_path}" "${ci_patch_key}" ci_cache_invalid)
+        if (NOT ci_cache_invalid)
+            set(sha512sum_hash "cached")
+        else()
+            # download sha512sum file
+            # TODO: CI pkgs
+            set(sha512sum_url
+                "https://${ARTIFACT_GIT_HOST}/${ARTIFACT_REPO}/releases/download/${ARTIFACT_VERSION}/${ARTIFACT}.sha512sum")
+            set(sha512sum_file
+                "${CMAKE_CURRENT_BINARY_DIR}/.cpmutil_${ARTIFACT}_sha512sum")
 
-        cpm_download("${sha512sum_url}" "${sha512sum_file}")
+            cpm_download("${sha512sum_url}" "${sha512sum_file}")
 
-        file(READ "${sha512sum_file}" sha512sum_hash)
-        string(STRIP "${sha512sum_hash}" sha512sum_hash)
-        file(REMOVE "${sha512sum_file}")
+            file(READ "${sha512sum_file}" sha512sum_hash)
+            string(STRIP "${sha512sum_hash}" sha512sum_hash)
+            file(REMOVE "${sha512sum_file}")
+        endif()
 
         AddPackage(
             NAME ${ARTIFACT_PACKAGE}
