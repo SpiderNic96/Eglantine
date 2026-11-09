@@ -27,4 +27,9 @@ void InstallNavOverlay(Core::System& system, HookInstaller& hooks, u64 main_base
 /// map's area is not known yet.
 bool PingFromMenuMap(float u, float v);
 
+/// The pause menu's map is on screen at (x0, y0)-(x1, y1), in the menus' 1920x1080 layout units.
+/// Called while it shows; with a controller the right stick then moves a cursor on it and R3 puts
+/// the ping there. In play, L3+R3 together drop or lift a ping where the player stands (as G).
+void NoteMenuMap(float x0, float y0, float x1, float y1);
+
 } // namespace Core::Pokopia

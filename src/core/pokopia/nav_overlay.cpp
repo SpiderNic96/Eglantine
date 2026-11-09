@@ -27,7 +27,9 @@
 #include "core/memory.h"
 #include "core/pokopia/hooks.h"
 #include "core/pokopia/mouse_camera.h"
+#include "hid_core/frontend/emulated_controller.h"
 #include "hid_core/hid_core.h"
+#include "hid_core/hid_types.h"
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/gpu.h"
 #include "video_core/memory_manager.h"
@@ -117,6 +119,9 @@ std::optional<std::array<u8, 7>> Glyph(char c) {
     case 'H': return std::array<u8, 7>{0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11};
     case 'E': return std::array<u8, 7>{0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F};
     case 'R': return std::array<u8, 7>{0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11};
+    case 'P': return std::array<u8, 7>{0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10};
+    case 'I': return std::array<u8, 7>{0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E};
+    case 'G': return std::array<u8, 7>{0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F};
     case ' ': return std::array<u8, 7>{};
     default: return std::nullopt;
     }
@@ -478,6 +483,18 @@ struct MapInfo {
 };
 std::mutex g_map_mutex;
 MapInfo g_map;
+
+// The pause menu's map: where menu_mouse last saw it (1920x1080 layout units), and when.
+struct MenuMapRect {
+    float x0 = 0.f, y0 = 0.f, x1 = 0.f, y1 = 0.f;
+    std::chrono::steady_clock::time_point seen{};
+};
+std::mutex g_menu_map_mutex;
+MenuMapRect g_menu_map;
+constexpr auto MenuMapGone = std::chrono::milliseconds{200};
+// The menu shows the area around the texture's centre: its extent in cells, plus a margin
+// (main+0xf63b40 sets the map's UVs: 0.5 -+ extent * 800 * 1.0535 / 2 / the texture's world size).
+constexpr float MenuMargin = 1.0534979f;
 
 bool Valid(Core::Memory::Memory& memory, u64 address, u64 size = 8) {
     return address != 0 && memory.IsValidVirtualAddressRange(address, size);
@@ -878,6 +895,10 @@ struct State {
     u32 frame = 0;
     bool requested_once = false;
     bool mark_changed = true; // back in play: have the map redrawn even if nothing changed
+    // Controller: L3+R3 in play pings; on the pause menu's map the right stick moves a cursor.
+    bool prev_r3 = false, prev_chord = false;
+    bool map_cursor = false;
+    float cursor_u = 0.5f, cursor_v = 0.5f;
 };
 
 State& St() {
@@ -1054,6 +1075,125 @@ Common::HostOverlay::GuestTexture HiddenTexture() {
     return texture;
 }
 
+void MenuMapPinsAndCursor(Canvas& c, const State& s, Vec at, Vec ping, bool ping_on_map) {
+    if (ping_on_map) {
+        PinMarker(c, ping);
+    }
+    // A crosshair: a ring with four ticks, dark under white.
+    for (const auto& [width, color] : {std::pair{4.f, Dark}, std::pair{2.f, White}}) {
+        c.Ring(at, 9.f, width, color);
+        const float h = width * 0.5f;
+        c.Rect(at.x - 17.f, at.y - h, at.x - 11.f, at.y + h, color);
+        c.Rect(at.x + 11.f, at.y - h, at.x + 17.f, at.y + h, color);
+        c.Rect(at.x - h, at.y - 17.f, at.x + h, at.y - 11.f, color);
+        c.Rect(at.x - h, at.y + 11.f, at.x + h, at.y + 17.f, color);
+    }
+    c.Disc(at, 2.f, Ping);
+    (void)s;
+}
+
+struct Pad {
+    float rx = 0.f, ry = 0.f;
+    bool l3 = false, r3 = false;
+};
+
+Pad ReadPad(Core::HID::HIDCore& hid) {
+    const auto* controller = hid.GetEmulatedController(hid.GetFirstNpadId());
+    if (controller == nullptr) {
+        return {};
+    }
+    const auto sticks = controller->GetSticks();
+    const auto buttons = controller->GetNpadButtons();
+    return {static_cast<float>(sticks.right.x) / 32767.f,
+            static_cast<float>(sticks.right.y) / 32767.f, buttons.stick_l != 0,
+            buttons.stick_r != 0};
+}
+
+/// Where a world position is on the pause menu's map, 0..1 across it (PingFromMenuMap reversed).
+bool MenuMapUv(float x, float z, float* u, float* v) {
+    MapInfo map;
+    {
+        std::scoped_lock lock{g_map_mutex};
+        map = g_map;
+    }
+    if (!map.drawn || map.extent <= 0) {
+        return false;
+    }
+    const float span =
+        static_cast<float>(map.extent) * MenuMargin * static_cast<float>(map.cell_px);
+    const float tx = ((x + CellOrigin) / CellUnits - map.first_x) * map.cell_px;
+    const float ty = ((z + CellOrigin) / CellUnits - map.first_y) * map.cell_px;
+    *u = (tx - TextureSize * 0.5f) / span + 0.5f;
+    *v = (ty - TextureSize * 0.5f) / span + 0.5f;
+    return true;
+}
+
+/// On the pause menu's map: a cursor the right stick moves, R3 puts the ping under it (or lifts
+/// the ping when it is on it). False when the map is not on screen.
+bool MenuMapCursor(State& s, const Pad& pad, bool r3_press) {
+    MenuMapRect r;
+    {
+        std::scoped_lock lock{g_menu_map_mutex};
+        r = g_menu_map;
+    }
+    if (std::chrono::steady_clock::now() - r.seen > MenuMapGone || r.x1 - r.x0 < 8.f ||
+        r.y1 - r.y0 < 8.f) {
+        s.map_cursor = false;
+        return false;
+    }
+    float pu = 0.f, pv = 0.f;
+    const bool ping_on_map = s.ping && MenuMapUv(s.ping_x, s.ping_z, &pu, &pv) && pu >= 0.f &&
+                             pu <= 1.f && pv >= 0.f && pv <= 1.f;
+    if (!s.map_cursor) {
+        s.map_cursor = true;
+        s.cursor_u = ping_on_map ? pu : 0.5f;
+        s.cursor_v = ping_on_map ? pv : 0.5f;
+        s.last_signature = ~u64{0};
+    }
+    const auto curve = [](float value) {
+        constexpr float Dead = 0.2f;
+        const float a = std::fabs(value);
+        if (a < Dead) {
+            return 0.f;
+        }
+        const float t = std::min((a - Dead) / (1.f - Dead), 1.f);
+        return std::copysign(t * t, value);
+    };
+    constexpr float Speed = 0.7f / 60.f; // map widths a tick at full tilt
+    s.cursor_u = std::clamp(s.cursor_u + curve(pad.rx) * Speed, 0.f, 1.f);
+    s.cursor_v = std::clamp(s.cursor_v - curve(pad.ry) * Speed, 0.f, 1.f);
+    if (r3_press) {
+        if (ping_on_map && std::hypot(pu - s.cursor_u, pv - s.cursor_v) < 0.03f) {
+            s.ping = false;
+            LOG_INFO(Loader, "Pokopia navigation: ping lifted from the menu's map");
+        } else {
+            PingFromMenuMap(s.cursor_u, s.cursor_v);
+        }
+        s.last_signature = ~u64{0};
+    }
+
+    const float k = static_cast<float>(W) / 1920.f;
+    const float x0 = r.x0 * k, y0 = r.y0 * k, x1 = r.x1 * k, y1 = r.y1 * k;
+    const Vec at{x0 + s.cursor_u * (x1 - x0), y0 + s.cursor_v * (y1 - y0)};
+    const auto q = [](float value) { return static_cast<u64>(static_cast<s64>(value * 4.f)); };
+    const u64 signature = q(at.x) * 1000003ULL ^ q(at.y) * 998244353ULL ^ q(x0) * 7919ULL ^
+                          q(y0) * 131ULL ^ (s.ping ? q(pu * 512.f) * 31ULL ^ q(pv * 512.f) : 7ULL) ^
+                          0x4D41500000000000ULL;
+    if (signature == s.last_signature && s.shown) {
+        return true;
+    }
+    s.last_signature = signature;
+    Canvas& c = s.canvas;
+    c.Clear();
+    MenuMapPinsAndCursor(c, s, at, ping_on_map ? Vec{x0 + pu * (x1 - x0), y0 + pv * (y1 - y0)}
+                                               : Vec{-100.f, -100.f},
+                         ping_on_map);
+    Pill(c, "R3 PING", (x0 + x1) * 0.5f, std::min(y1 + 6.f, static_cast<float>(H) - 30.f));
+    Common::GetHostOverlay().Publish(c.px);
+    s.shown = true;
+    return true;
+}
+
 void Hide(State& s) {
     Common::GetHostOverlay().SetGuestTexture(HiddenTexture());
     s.mark_changed = true;
@@ -1073,7 +1213,15 @@ void Tick() {
 
     CameraInfo cam{};
     const bool have_camera = CameraState(*g_system, &cam);
-    if (hid.TakeNavPing() && have_camera) {
+    const bool in_play = have_camera && hid.IsInPlay();
+    const Pad pad = ReadPad(hid);
+    const bool chord = pad.l3 && pad.r3;
+    const bool chord_press = chord && !s.prev_chord;
+    const bool r3_press = pad.r3 && !s.prev_r3;
+    s.prev_chord = chord;
+    s.prev_r3 = pad.r3;
+    const bool want_ping = hid.TakeNavPing() || (in_play && chord_press);
+    if (want_ping && have_camera) {
         const float dx = cam.target[0] - s.ping_x, dz = cam.target[2] - s.ping_z;
         if (s.ping && std::hypot(dx, dz) < LiftRange) {
             s.ping = false;
@@ -1089,9 +1237,19 @@ void Tick() {
         s.last_signature = ~u64{0};
     }
 
-    if (!have_camera || !hid.IsInPlay()) {
+    if (!in_play) {
+        if (MenuMapCursor(s, pad, r3_press)) {
+            if (!overlay.Enabled()) {
+                overlay.SetEnabled(true);
+            }
+            return;
+        }
         Hide(s);
         return;
+    }
+    if (s.map_cursor) {
+        s.map_cursor = false;
+        s.last_signature = ~u64{0};
     }
     if (!overlay.Enabled()) {
         overlay.SetEnabled(true);
@@ -1146,9 +1304,6 @@ bool PingFromMenuMap(float u, float v) {
     if (!map.drawn || map.extent <= 0 || u < 0.f || u > 1.f || v < 0.f || v > 1.f) {
         return false;
     }
-    // The menu shows the area around the texture's centre: its extent in cells, plus a margin
-    // (main+0xf63b40 sets the map's UVs: 0.5 -+ extent * 800 * 1.0535 / 2 / the texture's world size).
-    constexpr float MenuMargin = 1.0534979f;
     const float span =
         static_cast<float>(map.extent) * MenuMargin * static_cast<float>(map.cell_px);
     const float tx = TextureSize * 0.5f + (u - 0.5f) * span;
@@ -1163,6 +1318,11 @@ bool PingFromMenuMap(float u, float v) {
     LOG_INFO(Loader, "Pokopia navigation: ping from the menu's map ({:.2f}, {:.2f}) at {:.0f} {:.0f}",
              u, v, s.ping_x, s.ping_z);
     return true;
+}
+
+void NoteMenuMap(float x0, float y0, float x1, float y1) {
+    std::scoped_lock lock{g_menu_map_mutex};
+    g_menu_map = {x0, y0, x1, y1, std::chrono::steady_clock::now()};
 }
 
 void InstallNavOverlay(Core::System& system, HookInstaller& hooks, u64 main_base) {

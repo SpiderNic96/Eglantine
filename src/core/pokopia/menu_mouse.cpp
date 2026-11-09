@@ -1090,6 +1090,12 @@ void Tick() {
         Scan();
     }
     Pick(px, py, inside);
+    for (const Pane& p : s.panes) {
+        if (std::strcmp(p.name, MenuMapPane) == 0 && p.x1 > p.x0 && p.y1 > p.y0) {
+            NoteMenuMap(p.x0, p.y0, p.x1, p.y1); // the controller's cursor on it (nav_overlay)
+            break;
+        }
+    }
     LogMenu();
     if (right_click) {
         s.steering = false;
