@@ -10,7 +10,9 @@
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <cstring>
 #include <string>
+#include <vector>
 
 #include "common/logging.h"
 #include "common/settings.h"
@@ -109,12 +111,41 @@ constexpr u32 TransformSlots = 0x41a;
 constexpr u64 ObjKind = 0x39f0, ObjState = 0x27fe, ObjFlags = 0x245e;
 u32 g_census_ticks{};
 u32 g_census_placed = ~0u;
+u32 g_census_stable{};  // censuses since the count last changed
+bool g_census_dumped{}; // the objects' layout was logged for this area
+
+// Which 8-byte words of a Pokémon object are non-zero, as hex (one bit a word): a Pokémon that is
+// there but not drawn should lack something the drawn ones have (its model, say).
+constexpr u64 ObjSize = 0x3d20;
+std::string NonZeroWords(Core::Memory::Memory& memory, u64 obj) {
+    std::vector<u8> bytes(ObjSize);
+    if (!memory.ReadBlock(obj, bytes.data(), bytes.size())) {
+        return "unreadable";
+    }
+    std::string out;
+    for (u64 at = 0; at + 32 <= ObjSize; at += 32) {
+        u32 nibble = 0;
+        for (u32 w = 0; w < 4; ++w) {
+            u64 word;
+            std::memcpy(&word, bytes.data() + at + w * 8, 8);
+            nibble |= word != 0 ? 1u << w : 0;
+        }
+        out.push_back("0123456789abcdef"[nibble]);
+    }
+    return out;
+}
 
 void Census(Core::Memory::Memory& memory, u64 pool, u32 placed) {
     if (++g_census_ticks < 60 && placed == g_census_placed) {
         return; // every 15 s, or when the count changes
     }
     g_census_ticks = 0;
+    g_census_stable = placed == g_census_placed ? g_census_stable + 1 : 0;
+    if (placed == 0) {
+        g_census_dumped = false;
+    }
+    const bool dump = !g_census_dumped && placed > 0 && g_census_stable >= 3; // ~45 s in the area
+    g_census_dumped |= dump;
     g_census_placed = placed;
     u64 world = 0;
     if (const u64 got = g_main_base + WorldGlobal; Valid(memory, got)) {
@@ -136,9 +167,12 @@ void Census(Core::Memory::Memory& memory, u64 pool, u32 placed) {
             z = std::bit_cast<float>(memory.Read32(pos + 8));
         }
         LOG_INFO(Loader,
-                 "  slot {:2} kind {:#05x}/{:#06x} state {:#06x} flags {:08x} row {:4} at {:.0f} {:.0f} {:.0f}",
-                 i, memory.Read16(obj + ObjKind), memory.Read16(obj + ObjKind + 2),
-                 memory.Read16(obj + ObjState), memory.Read32(obj + ObjFlags), row, x, y, z);
+                 "  slot {:2} resident {:4} kind {:#05x} state {:#06x} flags {:08x} at {:.0f} {:.0f} {:.0f}",
+                 i, row, memory.Read16(obj + ObjKind), memory.Read16(obj + ObjState),
+                 memory.Read32(obj + ObjFlags), x, y, z);
+        if (dump) {
+            LOG_INFO(Loader, "  layout resident {:4}: {}", row, NonZeroWords(memory, obj));
+        }
     }
 }
 
