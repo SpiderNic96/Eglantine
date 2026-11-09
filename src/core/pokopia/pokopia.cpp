@@ -40,10 +40,10 @@ void Install(Core::System& system, std::span<u8> image, u64 load_base, u64 progr
         !std::equal(BuildId.begin(), BuildId.end(), build_id.begin())) {
         return;
     }
-    InstallPokemonCap(system, load_base); // data only, so it works with NCE too
     if (Settings::IsNceEnabled()) {
         // NCE runs the game's code natively, where a stub's svc would not reach the hooks.
         LOG_INFO(Loader, "Pokopia mouse features: not available with the NCE CPU backend");
+        InstallPokemonCap(system, nullptr, load_base); // data only: raised at once
         return;
     }
     HookInstaller hooks{image, load_base, text_offset, text_size, text_mapped};
@@ -62,6 +62,7 @@ void Install(Core::System& system, std::span<u8> image, u64 load_base, u64 progr
     } else {
         InstallNavOverlay(system, hooks, load_base);
     }
+    InstallPokemonCap(system, &hooks, load_base); // after the camera hook, which it uses
 }
 
 } // namespace Core::Pokopia
