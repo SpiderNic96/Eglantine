@@ -142,6 +142,36 @@ void Census(Core::Memory::Memory& memory, u64 pool, u32 placed) {
     }
 }
 
+// Spawn trace (test builds): every call of the spawner (main+0x28c6c0), what its checks saw and
+// whether it made the Pokémon. Honey, area loads and arrivals all go through it.
+constexpr u64 SpawnEnterSite = 0x28c6e8;  // mov w8, #0x6608: x0 the list, w1, w2 (kind), x3..
+constexpr u64 SpawnLivingSite = 0x28c7d8; // cmp w22, w0: living vs the living limit
+constexpr u64 SpawnObjectsSite = 0x28c8e4; // cmp w0, w8: all Pokémon vs the hard limit
+constexpr u64 SpawnResultSite = 0x28c92c; // mov x27, x0: the new Pokémon, or null
+std::atomic<u32> g_spawn_kind{0};
+
+void OnSpawnEnter(Core::System& system, Kernel::Svc::ThreadContext& ctx) {
+    auto& memory = system.ApplicationMemory();
+    const u64 list = ctx.r[0];
+    const u32 free = Valid(memory, list + 0x6608, 8) ? memory.Read32(list + 0x6608) : ~0u;
+    const u32 top = Valid(memory, list + 0x6608, 8) ? memory.Read8(list + 0x660c) : ~0u;
+    g_spawn_kind = static_cast<u32>(ctx.r[2] & 0xffff);
+    LOG_INFO(Loader, "Pokopia spawn: kind {:#x} (w1 {:#x}), {} slots free, next slot {}",
+             ctx.r[2] & 0xffff, ctx.r[1] & 0xffff, free, top);
+}
+void OnSpawnLiving(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    LOG_INFO(Loader, "Pokopia spawn: kind {:#x}: {} living, limit {}", g_spawn_kind.load(),
+             static_cast<s32>(ctx.r[22]), static_cast<s32>(ctx.r[0]));
+}
+void OnSpawnObjects(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    LOG_INFO(Loader, "Pokopia spawn: kind {:#x}: {} Pokémon in all, hard limit {}",
+             g_spawn_kind.load(), static_cast<s32>(ctx.r[0]), static_cast<s32>(ctx.r[8]));
+}
+void OnSpawnResult(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    LOG_INFO(Loader, "Pokopia spawn: kind {:#x}: {}", g_spawn_kind.load(),
+             ctx.r[0] != 0 ? fmt::format("made at {:#x}", ctx.r[0]) : std::string{"NOT made"});
+}
+
 /// Free slots in the Pokémon pool, or ~0u if it cannot be read; logs how full it is.
 u32 PoolFreeSlots(Core::Memory::Memory& memory) {
     const u64 global = g_main_base + PoolGlobal;
@@ -313,6 +343,12 @@ void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base
     g_log_ticks = 0;
     g_system = &system;
     g_main_base = main_base;
+    if (hooks != nullptr) {
+        hooks->Add(SpawnEnterSite, &OnSpawnEnter, "Pokémon spawn trace");
+        hooks->Add(SpawnLivingSite, &OnSpawnLiving, "Pokémon spawn trace (living)");
+        hooks->Add(SpawnObjectsSite, &OnSpawnObjects, "Pokémon spawn trace (all)");
+        hooks->Add(SpawnResultSite, &OnSpawnResult, "Pokémon spawn trace (result)");
+    }
     g_cap = static_cast<u32>(std::clamp<long>(requested, 0, MaxCap));
     // Staged (the game's limit while loading, then up in play) needs the fill hook and the
     // camera hook that tells play apart; without them (NCE) the limit is simply raised.
