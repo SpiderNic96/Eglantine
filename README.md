@@ -17,6 +17,109 @@
 
 <h4 align="center">An experimental, free and open-source Nintendo Switch 2 emulator written in C++, derived from Eden, yuzu and Sudachi.</h4>
 
+> [!NOTE]
+> **This is SpiderNic96's `pokopia-more-pokemon` branch**, a fork of [notsapinho/Eglantine](https://github.com/notsapinho/Eglantine) with Pokémon Pokopia (2.0.1) extras: keyboard and mouse play, a live minimap with pings, and more Pokémon living in your world.
+> Builds: [Releases](https://github.com/SpiderNic96/Eglantine/releases), tagged `pokecap-build-<n>` (Windows x64 for now). The upstream README follows the comparison below.
+
+## What this build adds over notsapinho's Eglantine
+
+Everything here is for **Pokémon Pokopia 2.0.1** (build ID `76A489F3…`), only works with the **Dynarmic CPU backend** (not NCE), and can be switched off on its own (see [Switches](#switches)). The base is notsapinho's `main` at `780a1d08`.
+
+| Area | notsapinho/Eglantine | This build |
+| --- | --- | --- |
+| Joy-Con 2 mouse | Switch 2 mouse (Nmouse) works | Joy-Con 2 mouse fixes; it works alongside mouse panning (middle click swaps); the wheel taps the D-pad |
+| Camera | Right stick only | Mouse turns the camera through a game hook; the camera updates every frame above 120 fps |
+| Menus | Controller only | Click menu entries with the mouse (the cursor steers to them); right click is B |
+| Keyboard and mouse | Generic | A ready-made **Pokopia keyboard and mouse** input profile; a tool that turns the button prompts into keyboard and mouse glyphs (texture mod) |
+| Texture mods | — | Texture dumping and replacement (`EDEN_TEXTURE_DUMP`, `tools/texture_mods`) |
+| Minimap | — | The game's own map, **live on screen while you play**: you, Pokémon walking around, buildings and exits, north up |
+| Waypoints | — | A **ping** with an arrow and its distance at the top of the screen; set it with **G**, a click on the pause menu's map, **L3+R3**, or the **right stick and R3 on the pause map** |
+| Pokémon limit | The game's own (25 living, 30 in all) | **Up to 50** (default 30); raised a couple at a time once you are in play, so loading stays fast |
+| Builds | Every platform, on pushes to `main` | Windows by hand per run; channels `mouse-build-<n>` (mouse and minimap) and `pokecap-build-<n>` (this branch) |
+
+### Live minimap and ping
+
+![Live minimap over the game](docs/pokecap/minimap.jpg)
+
+The game's own pause-menu map, redrawn live into the bottom-left corner: the pink arrow is you, Poké Balls are Pokémon, symbols mark the PC, the Pokémon Center, houses and exits.
+
+![Ping arrow and distance](docs/pokecap/ping-arrow.jpg)
+
+With a ping set, an arrow at the top points to it with the distance; the pin shows on the minimap. Press **G** again where the ping is (or **L3+R3**) to lift it.
+
+### Controller cursor on the pause map
+
+On the pause menu's map the **right stick** moves a crosshair and **R3** drops the ping under it (or lifts it when the crosshair is on it); an "R3 PING" hint shows under the map. With a mouse, click the map instead.
+
+*Screenshot to come: new in pokecap-build-31.*
+
+### More Pokémon
+
+![More Pokémon living in a tester's town](docs/pokecap/more-pokemon.jpg)
+
+The limit of Pokémon living in your world is a game setting; this build raises it (`EDEN_POKOPIA_POKEMON_CAP`, 1–50, default 30). Testers saw Pokémon settle in areas they never reached before, because the old limit filled up near the start.
+
+How it works:
+- While the game loads, it keeps its own limit (or room for everyone already living there), so the loading screen is as quick as usual.
+- Once you are in play, the limit climbs by 2 every 3 seconds, and the game brings 2 more in each time (a short hitch each step).
+- The game's pool holds 64 Pokémon, visitors included, so 50 is the most this allows.
+
+> [!WARNING]
+> Back up your save before raising the limit. Going back to a build without it may have the game send the extra Pokémon away.
+
+### Mouse in menus and in play
+
+![Clicking the Handy Bag with the mouse, with keyboard glyphs](docs/pokecap/menu-mouse.jpg)
+
+Menus take mouse clicks: the game's cursor is steered to the entry you click, then A is pressed. Right click is B, the wheel is D-pad up and down. In play the mouse turns the camera; the left button is ZR and the right ZL.
+
+### Keyboard and mouse glyphs and profile
+
+![Keyboard and mouse button prompts](docs/pokecap/kbm-glyphs.png)
+
+The game's button prompts show keys and mouse buttons (made with [`tools/texture_mods`](tools/texture_mods), from Recompia's Kenney Input Prompts, CC0).
+
+![The Pokopia keyboard and mouse profile](docs/pokecap/kbm-profile.jpg)
+
+The profile lives in [`mods/Pokemon Pokopia (0400A3A01EE4C000)/Keyboard and mouse`](<mods/Pokemon Pokopia (0400A3A01EE4C000)/Keyboard and mouse>), whose README lists every key.
+
+### Switches
+
+Set these before starting Eglantine (Windows Command Prompt: `set NAME=value`, then `eglantine.exe`).
+
+| Variable | Does |
+| --- | --- |
+| `EDEN_POKOPIA_POKEMON_CAP` | Pokémon limit, 1–50 (default 30); `0` keeps the game's own |
+| `EDEN_POKOPIA_POKEMON_STAGED=0` | Raise the limit at once instead of in play (slow loading) |
+| `EDEN_POKOPIA_NAV=0` | No minimap or ping |
+| `EDEN_POKOPIA_MAP_REFRESH_MS` | How often the minimap is redrawn (default 2000) |
+| `EDEN_POKOPIA_MOUSE_CAMERA=0` | No mouse camera (and no minimap, which needs it) |
+| `EDEN_POKOPIA_CAMERA_EVERY_FRAME=0` | Camera at the game's own 120 Hz |
+| `EDEN_POKOPIA_MENU_MOUSE=0` | No mouse clicks in menus |
+| `EDEN_POKOPIA_MENU_LOG=1` | Log the menus' layouts (for bug reports) |
+
+### Known issues
+
+- Some menus pick the first entry instead of the clicked one (Daily Challenges, the Stamp Card, the Handy Bag's bottom row), and a few bounce between entries.
+- With the mouse there is no way yet to raise, lower or turn an object you are placing; the photo camera pans only with the arrow keys.
+- The Pokémon Center and house symbols on the minimap may be swapped.
+- The controller cursor on the pause map and the staged Pokémon limit are new in pokecap-build-31 and still being tested.
+
+## What notsapinho's Eglantine adds over its base
+
+Eglantine continues [Djihads80/Eglantine](https://github.com/Djihads80/Eglantine) on top of [Eden](https://git.eden-emu.dev/eden-emu/eden) (Eden's history up to June 2026, then about 1,700 commits of its own). In broad strokes:
+
+- **Switch 2 games**: the Switch 2 program format (NPDM ACID layout, loose ExeFS), ARMv8.1–8.5 instructions in Dynarmic, and the Switch 2 system services (`nx2:*`, such as display and GPU).
+- **Switch 2 GPU**: Switch 2 memory mapping, native GPU state, shader recompiler support for Switch 2 shaders, compute and tensor programs (Donkey Kong Bananza), its own shader cache.
+- **Game files**: `.nup` dumps and updates (platform detection, verified extraction, an editor), shown in the game list.
+- **Games**: Pokémon Pokopia playable; Mario Kart World, Splatoon Raiders, Donkey Kong Bananza and Hyrule Warriors brought up, with per-game fixes.
+- **Extras**: FSR 3 frame generation, a Joy-Con 2 mouse (Nmouse), private-server gateway routing with its own certificate, ready-made mods (Pokopia frame-rate mods).
+- **Builds**: clang with profile-guided optimization trained on Pokopia, `eden-cli` in every package, an update checker and news feed reading notsapinho's releases.
+
+See [notsapinho/Eglantine](https://github.com/notsapinho/Eglantine) for its own history and notes.
+
+---
+
 <p align="center">
   <a href="https://github.com/notsapinho/Eglantine/releases"><img src="https://img.shields.io/github/v/release/notsapinho/Eglantine?include_prereleases&label=latest%20build" alt="Latest build"></a>
   <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="License: GPLv3"></a>
