@@ -21,6 +21,7 @@
 
 #include "common/host_overlay.h"
 #include "common/logging.h"
+#include "common/settings.h"
 #include "core/core.h"
 #include "core/core_timing.h"
 #include "core/hle/kernel/svc.h"
@@ -1246,6 +1247,11 @@ void Tick() {
         s.last_signature = ~u64{0};
     }
 
+    if (!Settings::values.pokopia_minimap.GetValue()) {
+        // Hidden by hand (Settings -> Pikantine, or the Toggle Pokopia Minimap hotkey).
+        Hide(s);
+        return;
+    }
     if (!in_play) {
         if (MenuMapCursor(s, pad, r3_press)) {
             if (!overlay.Enabled()) {

@@ -249,9 +249,9 @@ void RestoreWindowState(std::unique_ptr<QtConfig>& qtConfig);
 // sync with uisettings.cpp
 // The Windows build has no amiibo hotkey.
 #ifdef _WIN32
-inline constexpr std::size_t NumDefaultHotkeys = 32;
-#else
 inline constexpr std::size_t NumDefaultHotkeys = 33;
+#else
+inline constexpr std::size_t NumDefaultHotkeys = 34;
 #endif
 extern const std::array<Shortcut, NumDefaultHotkeys> default_hotkeys;
 

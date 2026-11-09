@@ -122,6 +122,8 @@ add_executable(yuzu
     configuration/configure_ringcon.h
     configuration/configure_ringcon.ui
     configuration/configure_network.cpp
+    configuration/configure_pikantine.cpp
+    configuration/configure_pikantine.h
     configuration/configure_network.h
     configuration/configure_network.ui
     configuration/configure_system.cpp

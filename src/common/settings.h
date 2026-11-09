@@ -856,6 +856,12 @@ struct Values {
     Setting<bool> tas_loop{linkage, false, "tas_loop", Category::Controls};
     Setting<bool> tas_show_recording_dialog{linkage, true, "tas_show_recording_dialog", Category::Controls};
 
+    // Pikantine: Pokémon Pokopia's minimap overlay (core/pokopia/nav_overlay) and Pokémon limit
+    // (core/pokopia/pokemon_cap, 0 keeps the game's own; EDEN_POKOPIA_POKEMON_CAP overrides).
+    Setting<bool> pokopia_minimap{linkage, true, "pokopia_minimap", Category::Miscellaneous};
+    Setting<u8, true> pokopia_pokemon_cap{linkage, 30, 0, 50, "pokopia_pokemon_cap",
+                                          Category::Miscellaneous};
+
     Setting<bool> mouse_panning{
                                 linkage, false, "mouse_panning", Category::Controls, Specialization::Default, false};
     Setting<u8, true> mouse_panning_sensitivity{

@@ -1370,6 +1370,12 @@ void MainWindow::InitializeHotkeys() {
             QtCommon::system->GetRenderdocAPI().ToggleCapture();
         }
     });
+    // Pikantine: show or hide Pokopia's minimap overlay (core/pokopia/nav_overlay reads it).
+    connect_shortcut(QStringLiteral("Toggle Pokopia Minimap"), [] {
+        Settings::values.pokopia_minimap = !Settings::values.pokopia_minimap.GetValue();
+        LOG_INFO(Frontend, "Pokopia minimap: {}",
+                 Settings::values.pokopia_minimap.GetValue() ? "shown" : "hidden");
+    });
     connect_shortcut(QStringLiteral("Toggle Mouse Panning"), [&] {
         Settings::values.mouse_panning = !Settings::values.mouse_panning;
         if (Settings::values.mouse_panning) {

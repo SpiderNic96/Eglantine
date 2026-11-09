@@ -32,6 +32,7 @@ class ConfigureInput;
 class ConfigureProfileManager;
 class ConfigureSystem;
 class ConfigureNetwork;
+class ConfigurePikantine;
 class ConfigureUi;
 class ConfigureWeb;
 
@@ -94,6 +95,7 @@ private:
     std::unique_ptr<ConfigureHotkeys> hotkeys_tab;
     std::unique_ptr<ConfigureInput> input_tab;
     std::unique_ptr<ConfigureNetwork> network_tab;
+    std::unique_ptr<ConfigurePikantine> pikantine_tab;
     std::unique_ptr<ConfigureProfileManager> profile_tab;
     std::unique_ptr<ConfigureSystem> system_tab;
     std::unique_ptr<ConfigureWeb> web_tab;

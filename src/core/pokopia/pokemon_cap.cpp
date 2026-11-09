@@ -9,8 +9,10 @@
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <string>
 
 #include "common/logging.h"
+#include "common/settings.h"
 #include "core/core.h"
 #include "core/core_timing.h"
 #include "core/hle/kernel/svc.h"
@@ -26,7 +28,6 @@ constexpr u64 ParamsGlobal = 0x36ca678; // -> object whose +0x20 holds the game'
 constexpr u64 ParamsField = 0x20;
 constexpr u64 LivingLimit = 0x4bc;  // Pokémon that may live in the world (25)
 constexpr u64 ObjectLimit = 0x4c0;  // all Pokémon objects, the spawner's hard stop (30)
-constexpr u32 DefaultCap = 30;
 constexpr u32 MaxCap = 50;          // the object pool has 64 slots; leave room for visitors
 constexpr u32 MaxObjects = 56;
 
@@ -52,6 +53,7 @@ constexpr u32 Step = 2;
 Core::System* g_system{};
 u64 g_main_base{};
 u32 g_cap{};
+long g_env_cap = -1; // EDEN_POKOPIA_POKEMON_CAP, or -1: the setting decides (it can change in play)
 bool g_staged{};
 std::shared_ptr<Core::Timing::EventType> g_event;
 std::atomic<u64> g_fill_owner{0};
@@ -130,6 +132,12 @@ void Apply() {
     if (!Valid(memory, params + LivingLimit, 8)) {
         return;
     }
+    const long wanted = g_env_cap >= 0 ? g_env_cap : Settings::values.pokopia_pokemon_cap.GetValue();
+    const u32 cap = static_cast<u32>(std::clamp<long>(wanted, 0, MaxCap));
+    if (cap != g_cap) {
+        LOG_INFO(Loader, "Pokopia Pokémon limit: set to {}", cap == 0 ? "the game's own" : std::to_string(cap));
+        g_cap = cap;
+    }
     if (params != g_seen.params) {
         // New parameters (first load, or reloaded): note the game's own values before changing.
         const u32 living = memory.Read32(params + LivingLimit);
@@ -141,6 +149,11 @@ void Apply() {
         g_level = living;
         LOG_INFO(Loader, "Pokopia Pokémon limit: the game allows {} living ({} objects); up to {}",
                  living, objects, g_cap);
+    }
+    if (g_cap == 0) {
+        g_level = g_seen.living; // the game's own limit
+        Write(memory, params, g_level);
+        return;
     }
     const u32 target = std::max(g_cap, g_seen.living);
     if (!g_staged) {
@@ -191,7 +204,9 @@ void Apply() {
 
 void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base) {
     const char* value = std::getenv("EDEN_POKOPIA_POKEMON_CAP");
-    const long requested = value != nullptr ? std::strtol(value, nullptr, 10) : DefaultCap;
+    g_env_cap = value != nullptr ? std::max(0L, std::strtol(value, nullptr, 10)) : -1;
+    const long requested =
+        g_env_cap >= 0 ? g_env_cap : Settings::values.pokopia_pokemon_cap.GetValue();
     auto& timing = system.CoreTiming();
     if (g_event) {
         timing.UnscheduleEvent(g_event);
@@ -202,13 +217,9 @@ void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base
     g_loaded = false;
     g_last_count = 0;
     g_fill_owner = 0;
-    if (requested <= 0) {
-        LOG_INFO(Loader, "Pokopia Pokémon limit: the game's own (EDEN_POKOPIA_POKEMON_CAP=0)");
-        return;
-    }
     g_system = &system;
     g_main_base = main_base;
-    g_cap = static_cast<u32>(std::clamp<long>(requested, 1, MaxCap));
+    g_cap = static_cast<u32>(std::clamp<long>(requested, 0, MaxCap));
     // Staged (the game's limit while loading, then up in play) needs the fill hook and the
     // camera hook that tells play apart; without them (NCE) the limit is simply raised.
     const char* staged = std::getenv("EDEN_POKOPIA_POKEMON_STAGED");
@@ -226,7 +237,9 @@ void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base
             });
     }
     timing.ScheduleLoopingEvent(CheckNs, CheckNs, g_event);
-    LOG_INFO(Loader, "Pokopia Pokémon limit: up to {} (EDEN_POKOPIA_POKEMON_CAP){}", g_cap,
+    LOG_INFO(Loader, "Pokopia Pokémon limit: {} ({}){}",
+             g_cap == 0 ? "the game's own" : "up to " + std::to_string(g_cap),
+             g_env_cap >= 0 ? "EDEN_POKOPIA_POKEMON_CAP" : "Settings -> Pikantine",
              g_staged ? ", raised in play, a few at a time" : "");
 }
 

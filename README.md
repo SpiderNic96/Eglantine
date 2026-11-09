@@ -33,6 +33,7 @@ Everything here is for **Pokémon Pokopia 2.0.1** (build ID `76A489F3…`), only
 | Keyboard and mouse | Generic | A ready-made **Pokopia keyboard and mouse** input profile; a tool that turns the button prompts into keyboard and mouse glyphs (texture mod) |
 | Texture mods | — | Texture dumping and replacement (`EDEN_TEXTURE_DUMP`, `tools/texture_mods`) |
 | Minimap | — | The game's own map, **live on screen while you play**: you, Pokémon walking around, buildings and exits, north up |
+| Settings | — | A **Pikantine** page in Settings: minimap on or off, the Pokémon limit |
 | Waypoints | — | A **ping** with an arrow and its distance at the top of the screen; set it with **G**, a click on the pause menu's map, **L3+R3**, or the **right stick and R3 on the pause map** |
 | Pokémon limit | The game's own (25 living, 30 in all) | **Up to 50** (default 30); raised a couple at a time once you are in play, so loading stays fast |
 | Builds | Every platform, on pushes to `main` | Windows by hand per run; channels `mouse-build-<n>` (mouse and minimap) and `pokecap-build-<n>` (Pikantine) |
@@ -47,6 +48,8 @@ The game's own pause-menu map, redrawn live into the bottom-left corner: the pin
 
 With a ping set, an arrow at the top points to it with the distance; the pin shows on the minimap. Press **G** again where the ping is (or **L3+R3**) to lift it.
 
+Hide or show the minimap at any time with **F7** or **Home + D-pad Left** (the *Toggle Pokopia Minimap* hotkey, changeable under Settings → General → Hotkeys), or with the checkbox in Settings → Pikantine.
+
 ### Controller cursor on the pause map
 
 On the pause menu's map the **right stick** moves a crosshair and **R3** drops the ping under it (or lifts it when the crosshair is on it); an "R3 PING" hint shows under the map. With a mouse, click the map instead.
@@ -57,7 +60,7 @@ On the pause menu's map the **right stick** moves a crosshair and **R3** drops t
 
 ![More Pokémon living in a tester's town](docs/pokecap/more-pokemon.jpg)
 
-The limit of Pokémon living in your world is a game setting; this build raises it (`EDEN_POKOPIA_POKEMON_CAP`, 1–50, default 30). Testers saw Pokémon settle in areas they never reached before, because the old limit filled up near the start.
+The limit of Pokémon living in your world is a game setting; this build raises it (Settings → Pikantine, 0–50, default 30; 0 keeps the game's own; changes apply while the game runs). Testers saw Pokémon settle in areas they never reached before, because the old limit filled up near the start.
 
 How it works:
 - While the game loads, it keeps its own limit (or room for everyone already living there), so the loading screen is as quick as usual.
@@ -85,11 +88,11 @@ The profile lives in [`mods/Pokemon Pokopia (0400A3A01EE4C000)/Keyboard and mous
 
 ### Switches
 
-Set these before starting Eglantine (Windows Command Prompt: `set NAME=value`, then `eglantine.exe`).
+Most people only need Settings → **Pikantine**. These are for testing; set them before starting Eglantine (Windows Command Prompt: `set NAME=value`, then `eglantine.exe`).
 
 | Variable | Does |
 | --- | --- |
-| `EDEN_POKOPIA_POKEMON_CAP` | Pokémon limit, 1–50 (default 30); `0` keeps the game's own |
+| `EDEN_POKOPIA_POKEMON_CAP` | Pokémon limit, overriding Settings → Pikantine: 1–50, or `0` for the game's own |
 | `EDEN_POKOPIA_POKEMON_STAGED=0` | Raise the limit at once instead of in play (slow loading) |
 | `EDEN_POKOPIA_NAV=0` | No minimap or ping |
 | `EDEN_POKOPIA_MAP_REFRESH_MS` | How often the minimap is redrawn (default 2000) |

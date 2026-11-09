@@ -26,6 +26,7 @@
 #include "yuzu/configuration/configure_input.h"
 #include "yuzu/configuration/configure_input_player.h"
 #include "yuzu/configuration/configure_network.h"
+#include "yuzu/configuration/configure_pikantine.h"
 #include "yuzu/configuration/configure_profile_manager.h"
 #include "yuzu/configuration/configure_system.h"
 #include "yuzu/configuration/configure_ui.h"
@@ -59,6 +60,7 @@ ConfigureDialog::ConfigureDialog(QWidget* parent, HotkeyRegistry& registry_,
       hotkeys_tab{std::make_unique<ConfigureHotkeys>(system_.HIDCore(), this)},
       input_tab{std::make_unique<ConfigureInput>(system_, this)},
       network_tab{std::make_unique<ConfigureNetwork>(system_, this)},
+      pikantine_tab{std::make_unique<ConfigurePikantine>(this)},
       profile_tab{std::make_unique<ConfigureProfileManager>(system_, this)},
       system_tab{std::make_unique<ConfigureSystem>(system_, nullptr, *builder, this)},
       web_tab{std::make_unique<ConfigureWeb>(this)} {
@@ -79,6 +81,7 @@ ConfigureDialog::ConfigureDialog(QWidget* parent, HotkeyRegistry& registry_,
     ui->tabWidget->addTab(input_tab.get(), tr("Controls"));
     ui->tabWidget->addTab(profile_tab.get(), tr("Profiles"));
     ui->tabWidget->addTab(network_tab.get(), tr("Network"));
+    ui->tabWidget->addTab(pikantine_tab.get(), tr("Pikantine"));
     ui->tabWidget->addTab(system_tab.get(), tr("System"));
     ui->tabWidget->addTab(ui_tab.get(), tr("Game List"));
     ui->tabWidget->addTab(web_tab.get(), tr("Web"));
@@ -137,6 +140,7 @@ void ConfigureDialog::ApplyConfiguration() {
     debug_tab_tab->ApplyConfiguration();
     web_tab->ApplyConfiguration();
     network_tab->ApplyConfiguration();
+    pikantine_tab->ApplyConfiguration();
     applets_tab->ApplyConfiguration();
     system.ApplySettings();
     Settings::LogSettings();
@@ -171,7 +175,7 @@ void ConfigureDialog::HandleApplyButtonClicked() {
 Q_DECLARE_METATYPE(QList<QWidget*>);
 
 void ConfigureDialog::PopulateSelectionList() {
-    const std::array<std::pair<QString, QList<QWidget*>>, 6> items{
+    const std::array<std::pair<QString, QList<QWidget*>>, 7> items{
         {{tr("General"),
           {general_tab.get(), hotkeys_tab.get(), ui_tab.get(), web_tab.get(), debug_tab_tab.get()}},
          {tr("System"),
@@ -181,7 +185,8 @@ void ConfigureDialog::PopulateSelectionList() {
          {tr("Graphics"),
           {graphics_tab.get(), graphics_advanced_tab.get(), graphics_extensions_tab.get()}},
          {tr("Audio"), {audio_tab.get()}},
-         {tr("Controls"), input_tab->GetSubTabs()}},
+         {tr("Controls"), input_tab->GetSubTabs()},
+         {tr("Pikantine"), {pikantine_tab.get()}}},
     };
 
     [[maybe_unused]] const QSignalBlocker blocker(ui->selectorList);

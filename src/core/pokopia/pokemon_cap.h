@@ -28,7 +28,8 @@ namespace Core::Pokopia {
 /// limit while loading, and in play the limit climbs a couple at a time, each step bringing that
 /// many in. EDEN_POKOPIA_POKEMON_STAGED=0 raises it at once instead.
 ///
-/// EDEN_POKOPIA_POKEMON_CAP sets the limit (default 30, at most 50); 0 leaves the game's own.
+/// The limit is Settings -> Pikantine's (pokopia_pokemon_cap, default 30, at most 50, 0 the game's own),
+/// and can change while the game runs; EDEN_POKOPIA_POKEMON_CAP overrides it.
 void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base);
 
 } // namespace Core::Pokopia
