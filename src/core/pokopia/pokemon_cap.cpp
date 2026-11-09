@@ -49,6 +49,15 @@ constexpr u64 FillSeen = 0x2c0c;
 // at a load the game brings Pokémon in only up to its own limit (it would load every one of them
 // behind the black screen, for minutes), and in play the fill climbs by Step every StepTicks.
 constexpr std::chrono::nanoseconds CheckNs{std::chrono::milliseconds{250}};
+
+// The Pokémon object pool ([[main+0x3483bd0]]): 64 slots, +0x50 a pointer per slot, +0x6608 the
+// free slots' stack (u32 count). Every Pokémon the game has placed, in any area visited, holds
+// one; once none is free the game cannot place more, and Pokémon vanish until a restart. Steps
+// stop while SlotReserve or fewer are free.
+constexpr u64 PoolGlobal = 0x3483bd0;
+constexpr u64 PoolSlots = 0x50, PoolFree = 0x6608;
+constexpr u32 PoolSize = 64;
+constexpr u32 SlotReserve = 10;
 constexpr u32 SettleTicks = 12; // 3 s in play before the first step
 constexpr u32 StepTicks = 12;   // then a step every 3 s
 constexpr u32 Step = 2;
@@ -71,6 +80,8 @@ struct Seen {
 Seen g_seen;
 u32 g_play_ticks{}; // ticks in play since the residents came back
 bool g_loaded{};
+u32 g_logged_free = ~0u;
+u32 g_log_ticks{};
 
 bool Valid(Core::Memory::Memory& memory, u64 address, u64 size = 8) {
     return address != 0 && memory.IsValidVirtualAddressRange(address, size);
@@ -87,6 +98,38 @@ void OnFillAmount(Core::System&, Kernel::Svc::ThreadContext& ctx) {
     if (static_cast<u32>(ctx.r[8]) > cap) {
         ctx.r[8] = cap; // w1 = w8 - w0: bring in no more than up to the cap
     }
+}
+
+/// Free slots in the Pokémon pool, or ~0u if it cannot be read; logs how full it is.
+u32 PoolFreeSlots(Core::Memory::Memory& memory) {
+    const u64 global = g_main_base + PoolGlobal;
+    if (!Valid(memory, global)) {
+        return ~0u;
+    }
+    const u64 holder = memory.Read64(global);
+    if (!Valid(memory, holder)) {
+        return ~0u;
+    }
+    const u64 pool = memory.Read64(holder);
+    if (!Valid(memory, pool + PoolSlots, PoolSize * 8) || !Valid(memory, pool + PoolFree, 4)) {
+        return ~0u;
+    }
+    const u32 free = memory.Read32(pool + PoolFree);
+    if (free > PoolSize) {
+        return ~0u;
+    }
+    ++g_log_ticks;
+    if (free != g_logged_free && g_log_ticks >= 20) { // at most every 5 s
+        u32 placed = 0;
+        for (u32 i = 0; i < PoolSize; ++i) {
+            placed += memory.Read64(pool + PoolSlots + i * 8) != 0 ? 1 : 0;
+        }
+        LOG_INFO(Loader, "Pokopia Pokémon slots: {} of {} in use ({} free), {} living at the last fill",
+                 placed, PoolSize, free, g_fill_living.load(std::memory_order_relaxed));
+        g_logged_free = free;
+        g_log_ticks = 0;
+    }
+    return free;
 }
 
 bool ResidentsLoaded(Core::Memory::Memory& memory) {
@@ -161,6 +204,7 @@ void Apply() {
         return;
     }
 
+    const u32 free = PoolFreeSlots(memory);
     if (!ResidentsLoaded(memory)) {
         // Loading (or between areas): the game fills only up to its own limit.
         if (g_loaded) {
@@ -179,6 +223,11 @@ void Apply() {
     }
     ++g_play_ticks;
     if (g_play_ticks < SettleTicks || (g_play_ticks - SettleTicks) % StepTicks != 0) {
+        return;
+    }
+    if (free != ~0u && free <= SlotReserve) {
+        LOG_INFO(Loader, "Pokopia Pokémon limit: holding at {}, only {} of {} slots free", fill,
+                 free, PoolSize);
         return;
     }
     // From the Pokémon already living (a save can hold more than the game's own limit).
@@ -211,6 +260,8 @@ void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base
     g_fill_owner = 0;
     g_fill_living = 0;
     g_fill_cap = ~0u;
+    g_logged_free = ~0u;
+    g_log_ticks = 0;
     g_system = &system;
     g_main_base = main_base;
     g_cap = static_cast<u32>(std::clamp<long>(requested, 0, MaxCap));
