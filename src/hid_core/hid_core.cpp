@@ -229,6 +229,10 @@ u64 HIDCore::GetMenuButtons() const {
 }
 
 bool HIDCore::IsCameraLive() const {
+    return IsCameraLive(250'000'000);
+}
+
+bool HIDCore::IsCameraLive(s64 window_ns) const {
     const s64 last = last_camera_turn_ns;
     if (!mouse_camera_hooked || last == 0) {
         return false;
@@ -236,7 +240,7 @@ bool HIDCore::IsCameraLive() const {
     const s64 now = std::chrono::duration_cast<std::chrono::nanoseconds>(
                         std::chrono::steady_clock::now().time_since_epoch())
                         .count();
-    return now - last <= 250'000'000;
+    return now - last <= window_ns;
 }
 
 void HIDCore::RequestNavPing() {

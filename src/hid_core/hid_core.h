@@ -92,6 +92,8 @@ public:
     /// The hooked camera could turn within the last 250 ms. False in menus outside play, the
     /// pause screen, loading screens and cutscenes, and when no hook is in.
     bool IsCameraLive() const;
+    /// The game's camera hook ran within the last `window_ns`.
+    bool IsCameraLive(s64 window_ns) const;
     /// In play: the camera is live and no menu is up over it.
     bool IsInPlay() const;
 

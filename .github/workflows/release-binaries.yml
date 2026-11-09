@@ -768,5 +768,5 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --target "${GITHUB_SHA}" \
             --prerelease \
-            --title "Eglantine mouse + Pokémon cap build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7})" \
+            --title "Pikantine build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7})" \
             --notes-file notes.md

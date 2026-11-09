@@ -1109,6 +1109,11 @@ Pad ReadPad(Core::HID::HIDCore& hid) {
             buttons.stick_r != 0};
 }
 
+bool MenuMapOnScreen() {
+    std::scoped_lock lock{g_menu_map_mutex};
+    return std::chrono::steady_clock::now() - g_menu_map.seen <= MenuMapGone;
+}
+
 /// Where a world position is on the pause menu's map, 0..1 across it (PingFromMenuMap reversed).
 bool MenuMapUv(float x, float z, float* u, float* v) {
     MapInfo map;
@@ -1213,7 +1218,11 @@ void Tick() {
 
     CameraInfo cam{};
     const bool have_camera = CameraState(*g_system, &cam);
-    const bool in_play = have_camera && hid.IsInPlay();
+    // In play: the camera moves each frame and the pause menu's map is not up. Not the menu
+    // mouse's in-game menu detection: a Handy Bag kept on screen ("Always Display Handy Bag")
+    // counts as a menu there, and hid the minimap for the whole of play.
+    constexpr s64 PlayWindowNs = 150'000'000;
+    const bool in_play = have_camera && hid.IsCameraLive(PlayWindowNs) && !MenuMapOnScreen();
     const Pad pad = ReadPad(hid);
     const bool chord = pad.l3 && pad.r3;
     const bool chord_press = chord && !s.prev_chord;

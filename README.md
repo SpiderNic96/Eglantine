@@ -9,23 +9,23 @@
 
 <h1 align="center">
   <br>
-  <img src="https://github.com/user-attachments/assets/35031845-4bfa-4916-8bf5-bc3bce67d5e2" alt="Eglantine" width="200">
+  <img src="docs/pokecap/pikantine.png" alt="Pikantine" width="200">
   <br>
-  <b>Eglantine</b>
+  <b>Pikantine</b>
   <br>
 </h1>
 
-<h4 align="center">An experimental, free and open-source Nintendo Switch 2 emulator written in C++, derived from Eden, yuzu and Sudachi.</h4>
+<h4 align="center">A Pokémon Pokopia build of Eglantine, the experimental, free and open-source Nintendo Switch 2 emulator written in C++, derived from Eden, yuzu and Sudachi.</h4>
 
 > [!NOTE]
-> **This is SpiderNic96's `pokopia-more-pokemon` branch**, a fork of [notsapinho/Eglantine](https://github.com/notsapinho/Eglantine) with Pokémon Pokopia (2.0.1) extras: keyboard and mouse play, a live minimap with pings, and more Pokémon living in your world.
+> **Pikantine** is SpiderNic96's `Pikantine` branch of [notsapinho/Eglantine](https://github.com/notsapinho/Eglantine), with Pokémon Pokopia (2.0.1) extras: keyboard and mouse play, a live minimap with pings, and more Pokémon living in your world.
 > Builds: [Releases](https://github.com/SpiderNic96/Eglantine/releases), tagged `pokecap-build-<n>` (Windows x64 for now). The upstream README follows the comparison below.
 
-## What this build adds over notsapinho's Eglantine
+## What Pikantine adds over notsapinho's Eglantine
 
 Everything here is for **Pokémon Pokopia 2.0.1** (build ID `76A489F3…`), only works with the **Dynarmic CPU backend** (not NCE), and can be switched off on its own (see [Switches](#switches)). The base is notsapinho's `main` at `780a1d08`.
 
-| Area | notsapinho/Eglantine | This build |
+| Area | notsapinho/Eglantine | Pikantine |
 | --- | --- | --- |
 | Joy-Con 2 mouse | Switch 2 mouse (Nmouse) works | Joy-Con 2 mouse fixes; it works alongside mouse panning (middle click swaps); the wheel taps the D-pad |
 | Camera | Right stick only | Mouse turns the camera through a game hook; the camera updates every frame above 120 fps |
@@ -35,7 +35,7 @@ Everything here is for **Pokémon Pokopia 2.0.1** (build ID `76A489F3…`), only
 | Minimap | — | The game's own map, **live on screen while you play**: you, Pokémon walking around, buildings and exits, north up |
 | Waypoints | — | A **ping** with an arrow and its distance at the top of the screen; set it with **G**, a click on the pause menu's map, **L3+R3**, or the **right stick and R3 on the pause map** |
 | Pokémon limit | The game's own (25 living, 30 in all) | **Up to 50** (default 30); raised a couple at a time once you are in play, so loading stays fast |
-| Builds | Every platform, on pushes to `main` | Windows by hand per run; channels `mouse-build-<n>` (mouse and minimap) and `pokecap-build-<n>` (this branch) |
+| Builds | Every platform, on pushes to `main` | Windows by hand per run; channels `mouse-build-<n>` (mouse and minimap) and `pokecap-build-<n>` (Pikantine) |
 
 ### Live minimap and ping
 
