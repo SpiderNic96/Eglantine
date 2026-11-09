@@ -63,9 +63,9 @@ On the pause menu's map the **right stick** moves a crosshair and **R3** drops t
 The limit of Pokémon living in your world is a game setting; this build raises it (Settings → Pikantine, 0–50, default 30; 0 keeps the game's own; changes apply while the game runs). Testers saw Pokémon settle in areas they never reached before, because the old limit filled up near the start.
 
 How it works:
-- The limit stays raised the whole time. (Lowering it, even only while an area loaded, had the game send Pokémon away for good, fixed in build 35.)
-- While an area loads, only the game's usual number of Pokémon move in, so the loading screen is as quick as usual.
-- Once you are in play, two more move in every 3 seconds until the limit is reached (a short hitch each step).
+- The limit is per area: the game places an area's Pokémon while it loads (each area starts from an empty pool of 64), so higher numbers make entering an area slower; around 30 stays quick.
+- The limit is never lowered while you play (lowering it had the game send Pokémon away until a restart).
+- The log shows how full the pool is: `Pokopia Pokémon slots: N of 64 in use`.
 - The game's pool holds 64 Pokémon, visitors included, so 50 is the most this allows.
 
 > [!WARNING]

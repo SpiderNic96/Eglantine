@@ -23,11 +23,10 @@ namespace Core::Pokopia {
 /// are rewritten here while the game runs; the object pool behind them has 64 slots, so the
 /// limit stays well under that.
 ///
-/// The game brings Pokémon in up to the limit while its loading screen is up, all at once, so a
-/// big raise made loading take minutes. With `hooks` (and the camera hook) that fill is held to
-/// the game's own limit while an area loads and climbs a couple at a time in play; the limit itself
-/// is never lowered (lowering it had the game send Pokémon away). EDEN_POKOPIA_POKEMON_STAGED=0
-/// fills at once instead.
+/// The game brings Pokémon in up to the limit while an area loads, all at once (it places Pokémon
+/// only then), so a high limit makes entering an area slower. Each area starts from an empty pool
+/// of 64. EDEN_POKOPIA_POKEMON_STAGED=1 tries filling a couple at a time in play instead
+/// (experimental: in a test the game placed none of them).
 ///
 /// The limit is Settings -> Pikantine's (pokopia_pokemon_cap, default 30, at most 50, 0 the game's own),
 /// and can change while the game runs; EDEN_POKOPIA_POKEMON_CAP overrides it.

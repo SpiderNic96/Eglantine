@@ -119,7 +119,7 @@ u32 PoolFreeSlots(Core::Memory::Memory& memory) {
         return ~0u;
     }
     ++g_log_ticks;
-    if (free != g_logged_free && g_log_ticks >= 20) { // at most every 5 s
+    if (free != g_logged_free && (g_log_ticks >= 12 || free <= 2)) { // at most every 3 s
         u32 placed = 0;
         for (u32 i = 0; i < PoolSize; ++i) {
             placed += memory.Read64(pool + PoolSlots + i * 8) != 0 ? 1 : 0;
@@ -199,12 +199,12 @@ void Apply() {
     }
     const u32 target = std::max(g_cap, g_seen.living);
     Write(memory, params, target); // never lowered: that sends Pokémon away
+    const u32 free = PoolFreeSlots(memory);
     if (!g_staged) {
         g_fill_cap = ~0u;
         return;
     }
 
-    const u32 free = PoolFreeSlots(memory);
     if (!ResidentsLoaded(memory)) {
         // Loading (or between areas): the game fills only up to its own limit.
         if (g_loaded) {
@@ -267,9 +267,11 @@ void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base
     g_cap = static_cast<u32>(std::clamp<long>(requested, 0, MaxCap));
     // Staged (the game's limit while loading, then up in play) needs the fill hook and the
     // camera hook that tells play apart; without them (NCE) the limit is simply raised.
+    // Staged filling is opt-in (EDEN_POKOPIA_POKEMON_STAGED=1): a test showed the game places
+    // Pokémon only while an area loads, so the in-play steps added none (25 placed per area).
     const char* staged = std::getenv("EDEN_POKOPIA_POKEMON_STAGED");
     g_staged = hooks != nullptr && system.HIDCore().IsMouseCameraHooked() &&
-               !(staged != nullptr && staged[0] == '0') &&
+               staged != nullptr && staged[0] == '1' &&
                hooks->AddInline(FillStoreSite, &OnFillStore, "Pokémon limit (fill)") &&
                hooks->Add(FillAmountSite, &OnFillAmount, "Pokémon limit (fill amount)");
     if (!g_event) {

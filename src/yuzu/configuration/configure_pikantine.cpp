@@ -43,9 +43,9 @@ ConfigurePikantine::ConfigurePikantine(const Core::System& system_, QWidget* par
     pokemon_cap->setSpecialValueText(tr("Game's own (25)"));
     cap_layout->addRow(tr("Pokémon living in your world"), pokemon_cap);
     pokemon_cap_note = new QLabel(
-        tr("Up to 50. The limit stays raised all the time; while an area loads only the game's "
-           "usual number move in, then once you are in play two more come every few seconds. "
-           "Changes apply while the game runs.<br><b>Back up your save first:</b> going back to a lower limit may have the "
+        tr("Up to 50, per area. The game places Pokémon while an area loads, so a higher number "
+           "makes entering an area slower (around 30 stays quick). Changes apply from the next "
+           "area you enter.<br><b>Back up your save first:</b> going back to a lower limit may have the "
            "game send the extra Pokémon away."),
         cap_box);
     pokemon_cap_note->setWordWrap(true);
