@@ -1254,6 +1254,9 @@ void Tick() {
     }
     if (!in_play) {
         if (MenuMapCursor(s, pad, r3_press)) {
+            // The pause menu's map is up: the live minimap layer must not cover it.
+            overlay.SetGuestTexture(HiddenTexture());
+            s.mark_changed = true;
             if (!overlay.Enabled()) {
                 overlay.SetEnabled(true);
             }

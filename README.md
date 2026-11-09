@@ -33,7 +33,7 @@ Everything here is for **Pokémon Pokopia 2.0.1** (build ID `76A489F3…`), only
 | Keyboard and mouse | Generic | A ready-made **Pokopia keyboard and mouse** input profile; a tool that turns the button prompts into keyboard and mouse glyphs (texture mod) |
 | Texture mods | — | Texture dumping and replacement (`EDEN_TEXTURE_DUMP`, `tools/texture_mods`) |
 | Minimap | — | The game's own map, **live on screen while you play**: you, Pokémon walking around, buildings and exits, north up |
-| Settings | — | A **Pikantine** page in Settings: minimap on or off, the Pokémon limit, a **Pokédex editor** |
+| Settings | — | A **Pikantine** page in Settings: minimap on or off, the Pokémon limit (a Pokédex editor is coming) |
 | Waypoints | — | A **ping** with an arrow and its distance at the top of the screen; set it with **G**, a click on the pause menu's map, **L3+R3**, or the **right stick and R3 on the pause map** |
 | Pokémon limit | The game's own (25 living, 30 in all) | **Up to 50** (default 30); raised a couple at a time once you are in play, so loading stays fast |
 | Builds | Every platform, on pushes to `main` | Windows by hand per run; channels `mouse-build-<n>` (mouse and minimap) and `pokecap-build-<n>` (Pikantine) |
@@ -63,18 +63,17 @@ On the pause menu's map the **right stick** moves a crosshair and **R3** drops t
 The limit of Pokémon living in your world is a game setting; this build raises it (Settings → Pikantine, 0–50, default 30; 0 keeps the game's own; changes apply while the game runs). Testers saw Pokémon settle in areas they never reached before, because the old limit filled up near the start.
 
 How it works:
-- While the game loads, it keeps its own limit (or room for everyone already living there), so the loading screen is as quick as usual.
-- Once you are in play, the limit climbs by 2 every 3 seconds, and the game brings 2 more in each time (a short hitch each step).
+- The limit stays raised the whole time. (Lowering it, even only while an area loaded, had the game send Pokémon away for good, fixed in build 35.)
+- While an area loads, only the game's usual number of Pokémon move in, so the loading screen is as quick as usual.
+- Once you are in play, two more move in every 3 seconds until the limit is reached (a short hitch each step).
 - The game's pool holds 64 Pokémon, visitors included, so 50 is the most this allows.
 
 > [!WARNING]
 > Back up your save before raising the limit. Going back to a build without it may have the game send the extra Pokémon away.
 
-### Pokédex editor
+### Pokédex editor (off for now)
 
-Settings → Pikantine → **Open the Pokédex editor…** finds your Pokopia save, shows which Pokémon it has registered (ticked) and lets you tick more; new ones show in green. **Save** backs the save folder up to `pikantine_backups` in Eglantine's folder first, then writes and checks it. Stop the game before saving. For Pokopia 2.0.1 saves; experimental.
-
-Names come from [PokoHex](https://github.com/berichan/PokoHex) (GPL-3.0). Some entries are characters rather than Pokédex Pokémon, so registering everything can push the count past the Pokédex's own.
+The first version (build 34) changed a save flag that turned out not to be the Pokédex, so ticked Pokémon did not register; it is switched off until the Pokédex's own save data is found. If you saved with it, put your save back from the `pikantine_backups` folder in Eglantine's folder.
 
 ### Mouse in menus and in play
 
@@ -112,7 +111,7 @@ Most people only need Settings → **Pikantine**. These are for testing; set the
 - Some menus pick the first entry instead of the clicked one (Daily Challenges, the Stamp Card, the Handy Bag's bottom row), and a few bounce between entries.
 - With the mouse there is no way yet to raise, lower or turn an object you are placing; the photo camera pans only with the arrow keys.
 - The Pokémon Center and house symbols on the minimap may be swapped.
-- The controller cursor on the pause map and the staged Pokémon limit are new in pokecap-build-31 and still being tested.
+- The controller cursor on the pause map and the staged Pokémon limit are still being tested.
 
 ## What notsapinho's Eglantine adds over its base
 

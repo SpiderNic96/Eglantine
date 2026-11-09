@@ -36,15 +36,18 @@ constexpr u64 ResidentsGlobal = 0x3561928;
 constexpr u64 ResidentsData = 0x2a0, ResidentsCount = 0x2ac;
 
 // main+0xba8c0, every frame: when the residents count first becomes non-zero (a load) it brings
-// Pokémon in up to the limit (main+0x1caa60, limit - living), then keeps the count at +0x2c0c of
-// its object. At its store (str w22, [x19, #0x2c0c]) the object is in x19. Clearing that count
-// has the game do the same again on the next frame, with the limit as it is then.
+// Pokémon in up to the limit (main+0x1caa60 with limit - living), then keeps the count at +0x2c0c
+// of its object. At its store (str w22, [x19, #0x2c0c]) the object is in x19; clearing that count
+// has the game do the same again on the next frame. Just before, at main+0xba980
+// (subs w1, w8, w0), w8 is the limit it fills up to and w0 the Pokémon living.
 constexpr u64 FillStoreSite = 0xba98c;
+constexpr u64 FillAmountSite = 0xba980;
 constexpr u64 FillSeen = 0x2c0c;
 
-// The game loads every Pokémon it brings in at once while the screen is black, so a big raise
-// made the loading screen take minutes. The game keeps its own limit while it loads; in play the
-// limit climbs by Step every StepTicks, and each step brings that many in.
+// The limit itself (the parameters above) is raised all the time: lowering it, even only while an
+// area loads, had the game send the Pokémon above it away for good. What is held back is the fill:
+// at a load the game brings Pokémon in only up to its own limit (it would load every one of them
+// behind the black screen, for minutes), and in play the fill climbs by Step every StepTicks.
 constexpr std::chrono::nanoseconds CheckNs{std::chrono::milliseconds{250}};
 constexpr u32 SettleTicks = 12; // 3 s in play before the first step
 constexpr u32 StepTicks = 12;   // then a step every 3 s
@@ -57,6 +60,8 @@ long g_env_cap = -1; // EDEN_POKOPIA_POKEMON_CAP, or -1: the setting decides (it
 bool g_staged{};
 std::shared_ptr<Core::Timing::EventType> g_event;
 std::atomic<u64> g_fill_owner{0};
+std::atomic<u32> g_fill_cap{~0u};  // the fill goes no higher than this (staged)
+std::atomic<u32> g_fill_living{0}; // living Pokémon at the last fill
 
 struct Seen {
     u64 params{};
@@ -64,10 +69,8 @@ struct Seen {
     u32 objects{};
 };
 Seen g_seen;
-u32 g_level{};      // the limit as it stands now
 u32 g_play_ticks{}; // ticks in play since the residents came back
 bool g_loaded{};
-u32 g_last_count{}; // Pokémon in the world when last in play: a load keeps room for them
 
 bool Valid(Core::Memory::Memory& memory, u64 address, u64 size = 8) {
     return address != 0 && memory.IsValidVirtualAddressRange(address, size);
@@ -77,18 +80,13 @@ void OnFillStore(Core::System&, Kernel::Svc::ThreadContext& ctx) {
     g_fill_owner.store(ctx.r[19], std::memory_order_relaxed);
 }
 
-/// Every Pokémon in the world (main+0x3561928: +0x2b8 ids, +0x2c4 count), or 0.
-u32 PokemonCount(Core::Memory::Memory& memory) {
-    const u64 global = g_main_base + ResidentsGlobal;
-    if (!Valid(memory, global)) {
-        return 0;
+void OnFillAmount(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    const u32 living = static_cast<u32>(ctx.r[0]);
+    g_fill_living.store(living, std::memory_order_relaxed);
+    const u32 cap = g_fill_cap.load(std::memory_order_relaxed);
+    if (static_cast<u32>(ctx.r[8]) > cap) {
+        ctx.r[8] = cap; // w1 = w8 - w0: bring in no more than up to the cap
     }
-    const u64 list = memory.Read64(global);
-    if (!Valid(memory, list + 0x2b8, 16) || memory.Read64(list + 0x2b8) == 0) {
-        return 0;
-    }
-    const s32 count = static_cast<s32>(memory.Read32(list + 0x2c4));
-    return count > 0 && count <= 64 ? static_cast<u32>(count) : 0;
 }
 
 bool ResidentsLoaded(Core::Memory::Memory& memory) {
@@ -135,7 +133,8 @@ void Apply() {
     const long wanted = g_env_cap >= 0 ? g_env_cap : Settings::values.pokopia_pokemon_cap.GetValue();
     const u32 cap = static_cast<u32>(std::clamp<long>(wanted, 0, MaxCap));
     if (cap != g_cap) {
-        LOG_INFO(Loader, "Pokopia Pokémon limit: set to {}", cap == 0 ? "the game's own" : std::to_string(cap));
+        LOG_INFO(Loader, "Pokopia Pokémon limit: set to {}",
+                 cap == 0 ? std::string{"the game's own"} : std::to_string(cap));
         g_cap = cap;
     }
     if (params != g_seen.params) {
@@ -146,58 +145,53 @@ void Apply() {
             return; // not filled in yet
         }
         g_seen = {params, living, objects};
-        g_level = living;
+        g_fill_cap = g_staged ? living : ~0u;
         LOG_INFO(Loader, "Pokopia Pokémon limit: the game allows {} living ({} objects); up to {}",
                  living, objects, g_cap);
     }
     if (g_cap == 0) {
-        g_level = g_seen.living; // the game's own limit
-        Write(memory, params, g_level);
+        g_fill_cap = ~0u;
+        Write(memory, params, g_seen.living); // the game's own limit
         return;
     }
     const u32 target = std::max(g_cap, g_seen.living);
+    Write(memory, params, target); // never lowered: that sends Pokémon away
     if (!g_staged) {
-        g_level = target;
-        Write(memory, params, g_level);
+        g_fill_cap = ~0u;
         return;
     }
 
-    const bool loaded = ResidentsLoaded(memory);
-    if (!loaded) {
-        // Loading (or between worlds): the game's own limit, so it loads as fast as it does alone,
-        // or room for the Pokémon already living (none is sent away for the lower limit).
-        g_last_count = std::max(g_last_count, PokemonCount(memory));
-        const u32 hold = std::clamp(g_last_count, g_seen.living, target);
+    if (!ResidentsLoaded(memory)) {
+        // Loading (or between areas): the game fills only up to its own limit.
         if (g_loaded) {
-            LOG_INFO(Loader, "Pokopia Pokémon limit: loading, {} until in play", hold);
+            LOG_INFO(Loader, "Pokopia Pokémon limit: loading, bringing in up to {} until in play",
+                     g_seen.living);
         }
         g_loaded = false;
-        g_level = hold;
+        g_fill_cap = g_seen.living;
         g_play_ticks = 0;
-        Write(memory, params, g_level);
         return;
     }
     g_loaded = true;
-    Write(memory, params, g_level);
-    if (g_system->HIDCore().IsCameraLive()) {
-        g_last_count = std::max(g_last_count, PokemonCount(memory));
-    }
-    if (g_level >= target || !g_system->HIDCore().IsCameraLive()) {
+    const u32 fill = g_fill_cap.load(std::memory_order_relaxed);
+    if (fill >= target || !g_system->HIDCore().IsCameraLive()) {
         return; // done, or not in play (menus, pause, cutscenes): wait
     }
     ++g_play_ticks;
     if (g_play_ticks < SettleTicks || (g_play_ticks - SettleTicks) % StepTicks != 0) {
         return;
     }
-    g_level = std::min(target, g_level + Step);
-    Write(memory, params, g_level);
+    // From the Pokémon already living (a save can hold more than the game's own limit).
+    const u32 living = g_fill_living.load(std::memory_order_relaxed);
+    const u32 next = std::min(target, std::max(fill, living) + Step);
+    g_fill_cap = next;
     const u64 owner = g_fill_owner.load(std::memory_order_relaxed);
     const bool refill = Valid(memory, owner + FillSeen, 4) && memory.Read32(owner + FillSeen) != 0;
     if (refill) {
-        memory.Write32(owner + FillSeen, 0); // the game brings Pokémon in up to the new limit
+        memory.Write32(owner + FillSeen, 0); // the game brings Pokémon in up to the new cap
     }
-    LOG_INFO(Loader, "Pokopia Pokémon limit: now {}{}", g_level,
-             refill ? ", bringing more in" : " (they move in over time)");
+    LOG_INFO(Loader, "Pokopia Pokémon limit: {}, bringing in up to {}{}", target, next,
+             refill ? "" : " (they move in over time)");
 }
 
 } // namespace
@@ -212,11 +206,11 @@ void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base
         timing.UnscheduleEvent(g_event);
     }
     g_seen = {};
-    g_level = 0;
     g_play_ticks = 0;
     g_loaded = false;
-    g_last_count = 0;
     g_fill_owner = 0;
+    g_fill_living = 0;
+    g_fill_cap = ~0u;
     g_system = &system;
     g_main_base = main_base;
     g_cap = static_cast<u32>(std::clamp<long>(requested, 0, MaxCap));
@@ -225,7 +219,8 @@ void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base
     const char* staged = std::getenv("EDEN_POKOPIA_POKEMON_STAGED");
     g_staged = hooks != nullptr && system.HIDCore().IsMouseCameraHooked() &&
                !(staged != nullptr && staged[0] == '0') &&
-               hooks->AddInline(FillStoreSite, &OnFillStore, "Pokémon limit (fill)");
+               hooks->AddInline(FillStoreSite, &OnFillStore, "Pokémon limit (fill)") &&
+               hooks->Add(FillAmountSite, &OnFillAmount, "Pokémon limit (fill amount)");
     if (!g_event) {
         g_event = Core::Timing::CreateEvent(
             "Pokopia Pokémon limit",

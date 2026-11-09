@@ -43,9 +43,9 @@ ConfigurePikantine::ConfigurePikantine(const Core::System& system_, QWidget* par
     pokemon_cap->setSpecialValueText(tr("Game's own (25)"));
     cap_layout->addRow(tr("Pokémon living in your world"), pokemon_cap);
     pokemon_cap_note = new QLabel(
-        tr("Up to 50. While the game loads it keeps its own limit, then once you are in play it "
-           "rises two at a time, and the game brings those Pokémon in. Changes apply while the "
-           "game runs.<br><b>Back up your save first:</b> going back to a lower limit may have the "
+        tr("Up to 50. The limit stays raised all the time; while an area loads only the game's "
+           "usual number move in, then once you are in play two more come every few seconds. "
+           "Changes apply while the game runs.<br><b>Back up your save first:</b> going back to a lower limit may have the "
            "game send the extra Pokémon away."),
         cap_box);
     pokemon_cap_note->setWordWrap(true);
@@ -60,11 +60,13 @@ ConfigurePikantine::ConfigurePikantine(const Core::System& system_, QWidget* par
     auto* dex_box = new QGroupBox(tr("Pokédex"), this);
     auto* dex_layout = new QVBoxLayout(dex_box);
     auto* dex_note = new QLabel(
-        tr("See which Pokémon your Pokopia save has registered, and pick more to register. "
-           "Pokopia 2.0.1 saves; the save is backed up first. Stop the game before saving."),
+        tr("<b>Off for now:</b> the save flag the editor changed turned out not to be the "
+           "Pokédex, so ticked Pokémon did not register. If you saved with it, put your save back "
+           "from the <b>pikantine_backups</b> folder in Eglantine's folder (Pikantine build 34)."),
         dex_box);
     dex_note->setWordWrap(true);
     auto* dex_button = new QPushButton(tr("Open the Pokédex editor…"), dex_box);
+    dex_button->setEnabled(false); // until the Pokédex's own save data is found
     dex_button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
     connect(dex_button, &QPushButton::clicked, this, [this] {
         PokopiaDexDialog dialog(system.IsPoweredOn(), this);
