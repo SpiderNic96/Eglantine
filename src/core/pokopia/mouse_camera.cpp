@@ -109,13 +109,15 @@ void OnCameraTurn(Core::System& system, Kernel::Svc::ThreadContext& ctx) {
     const bool fresh = g_last_turn_ns != 0 && now - g_last_turn_ns <= GraceNs;
     g_last_turn_ns = now;
     hid.MarkCameraTurn(now);
+    // Where the camera is, for the navigation overlay: kept on every frame, not only when the
+    // mouse turns it, so the minimap works with a controller or with mouse panning off.
+    const u64 cam = ctx.r[19];
+    g_last_cam.store(cam, std::memory_order_relaxed);
     if (!fresh || (dx == 0 && dy == 0) || !Settings::values.mouse_panning.GetValue() ||
         hid.IsNmouseActive()) {
         return;
     }
     auto& memory = system.ApplicationMemory();
-    const u64 cam = ctx.r[19];
-    g_last_cam.store(cam, std::memory_order_relaxed);
     if (!memory.IsValidVirtualAddressRange(cam, CamIdle + 4)) {
         return;
     }
