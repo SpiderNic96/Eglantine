@@ -33,7 +33,7 @@ Everything here is for **Pokémon Pokopia 2.0.1** (build ID `76A489F3…`), only
 | Keyboard and mouse | Generic | A ready-made **Pokopia keyboard and mouse** input profile; a tool that turns the button prompts into keyboard and mouse glyphs (texture mod) |
 | Texture mods | — | Texture dumping and replacement (`EDEN_TEXTURE_DUMP`, `tools/texture_mods`) |
 | Minimap | — | The game's own map, **live on screen while you play**: you, Pokémon walking around, buildings and exits, north up |
-| Settings | — | A **Pikantine** page in Settings: minimap on or off, the Pokémon limit |
+| Settings | — | A **Pikantine** page in Settings: minimap on or off, the Pokémon limit, a **Pokédex editor** |
 | Waypoints | — | A **ping** with an arrow and its distance at the top of the screen; set it with **G**, a click on the pause menu's map, **L3+R3**, or the **right stick and R3 on the pause map** |
 | Pokémon limit | The game's own (25 living, 30 in all) | **Up to 50** (default 30); raised a couple at a time once you are in play, so loading stays fast |
 | Builds | Every platform, on pushes to `main` | Windows by hand per run; channels `mouse-build-<n>` (mouse and minimap) and `pokecap-build-<n>` (Pikantine) |
@@ -69,6 +69,12 @@ How it works:
 
 > [!WARNING]
 > Back up your save before raising the limit. Going back to a build without it may have the game send the extra Pokémon away.
+
+### Pokédex editor
+
+Settings → Pikantine → **Open the Pokédex editor…** finds your Pokopia save, shows which Pokémon it has registered (ticked) and lets you tick more; new ones show in green. **Save** backs the save folder up to `pikantine_backups` in Eglantine's folder first, then writes and checks it. Stop the game before saving. For Pokopia 2.0.1 saves; experimental.
+
+Names come from [PokoHex](https://github.com/berichan/PokoHex) (GPL-3.0). Some entries are characters rather than Pokédex Pokémon, so registering everything can push the count past the Pokédex's own.
 
 ### Mouse in menus and in play
 

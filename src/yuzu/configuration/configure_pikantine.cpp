@@ -9,12 +9,16 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
+#include <QPushButton>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
 #include "common/settings.h"
+#include "core/core.h"
+#include "yuzu/configuration/pokopia_dex_dialog.h"
 
-ConfigurePikantine::ConfigurePikantine(QWidget* parent) : QWidget(parent) {
+ConfigurePikantine::ConfigurePikantine(const Core::System& system_, QWidget* parent)
+    : QWidget(parent), system{system_} {
     setAccessibleName(tr("Pikantine"));
     auto* layout = new QVBoxLayout(this);
 
@@ -52,6 +56,23 @@ ConfigurePikantine::ConfigurePikantine(QWidget* parent) : QWidget(parent) {
             tr("Set by the EDEN_POKOPIA_POKEMON_CAP environment variable, which overrides this."));
     }
     layout->addWidget(cap_box);
+
+    auto* dex_box = new QGroupBox(tr("Pokédex"), this);
+    auto* dex_layout = new QVBoxLayout(dex_box);
+    auto* dex_note = new QLabel(
+        tr("See which Pokémon your Pokopia save has registered, and pick more to register. "
+           "Pokopia 2.0.1 saves; the save is backed up first. Stop the game before saving."),
+        dex_box);
+    dex_note->setWordWrap(true);
+    auto* dex_button = new QPushButton(tr("Open the Pokédex editor…"), dex_box);
+    dex_button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+    connect(dex_button, &QPushButton::clicked, this, [this] {
+        PokopiaDexDialog dialog(system.IsPoweredOn(), this);
+        dialog.exec();
+    });
+    dex_layout->addWidget(dex_note);
+    dex_layout->addWidget(dex_button);
+    layout->addWidget(dex_box);
 
     layout->addStretch(1);
     SetConfiguration();

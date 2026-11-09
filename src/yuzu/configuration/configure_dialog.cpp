@@ -60,7 +60,7 @@ ConfigureDialog::ConfigureDialog(QWidget* parent, HotkeyRegistry& registry_,
       hotkeys_tab{std::make_unique<ConfigureHotkeys>(system_.HIDCore(), this)},
       input_tab{std::make_unique<ConfigureInput>(system_, this)},
       network_tab{std::make_unique<ConfigureNetwork>(system_, this)},
-      pikantine_tab{std::make_unique<ConfigurePikantine>(this)},
+      pikantine_tab{std::make_unique<ConfigurePikantine>(system_, this)},
       profile_tab{std::make_unique<ConfigureProfileManager>(system_, this)},
       system_tab{std::make_unique<ConfigureSystem>(system_, nullptr, *builder, this)},
       web_tab{std::make_unique<ConfigureWeb>(this)} {

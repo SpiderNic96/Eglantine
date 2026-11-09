@@ -124,6 +124,9 @@ add_executable(yuzu
     configuration/configure_network.cpp
     configuration/configure_pikantine.cpp
     configuration/configure_pikantine.h
+    configuration/pokopia_dex_dialog.cpp
+    configuration/pokopia_dex_dialog.h
+    configuration/pokopia_residents.h
     configuration/configure_network.h
     configuration/configure_network.ui
     configuration/configure_system.cpp
