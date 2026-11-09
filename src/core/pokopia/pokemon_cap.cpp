@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cstdlib>
 #include <memory>
@@ -100,6 +101,47 @@ void OnFillAmount(Core::System&, Kernel::Svc::ThreadContext& ctx) {
     }
 }
 
+// Census (test builds): every placed Pokémon, to see whether the ones that never appear exist.
+constexpr u64 WorldGlobal = 0x3483b60;   // GOT -> the world; +0x835af0 the transform table
+constexpr u64 TransformTable = 0x835af0;
+constexpr u64 TransformSlot = 0x382c;    // u32 in a Pokémon: its row in that table
+constexpr u32 TransformSlots = 0x41a;
+constexpr u64 ObjKind = 0x39f0, ObjState = 0x27fe, ObjFlags = 0x245e;
+u32 g_census_ticks{};
+u32 g_census_placed = ~0u;
+
+void Census(Core::Memory::Memory& memory, u64 pool, u32 placed) {
+    if (++g_census_ticks < 60 && placed == g_census_placed) {
+        return; // every 15 s, or when the count changes
+    }
+    g_census_ticks = 0;
+    g_census_placed = placed;
+    u64 world = 0;
+    if (const u64 got = g_main_base + WorldGlobal; Valid(memory, got)) {
+        const u64 holder = memory.Read64(got);
+        world = Valid(memory, holder) ? memory.Read64(holder) : 0;
+    }
+    LOG_INFO(Loader, "Pokopia Pokémon census: {} placed", placed);
+    for (u32 i = 0; i < PoolSize; ++i) {
+        const u64 obj = memory.Read64(pool + PoolSlots + i * 8);
+        if (obj == 0 || !Valid(memory, obj + ObjKind, 4)) {
+            continue;
+        }
+        const u32 row = memory.Read32(obj + TransformSlot);
+        float x = 0, y = 0, z = 0;
+        const u64 pos = world + TransformTable + static_cast<u64>(row) * 0x30 + 0x10;
+        if (world != 0 && row < TransformSlots && Valid(memory, pos, 12)) {
+            x = std::bit_cast<float>(memory.Read32(pos));
+            y = std::bit_cast<float>(memory.Read32(pos + 4));
+            z = std::bit_cast<float>(memory.Read32(pos + 8));
+        }
+        LOG_INFO(Loader,
+                 "  slot {:2} kind {:#05x}/{:#06x} state {:#06x} flags {:08x} row {:4} at {:.0f} {:.0f} {:.0f}",
+                 i, memory.Read16(obj + ObjKind), memory.Read16(obj + ObjKind + 2),
+                 memory.Read16(obj + ObjState), memory.Read32(obj + ObjFlags), row, x, y, z);
+    }
+}
+
 /// Free slots in the Pokémon pool, or ~0u if it cannot be read; logs how full it is.
 u32 PoolFreeSlots(Core::Memory::Memory& memory) {
     const u64 global = g_main_base + PoolGlobal;
@@ -117,6 +159,13 @@ u32 PoolFreeSlots(Core::Memory::Memory& memory) {
     const u32 free = memory.Read32(pool + PoolFree);
     if (free > PoolSize) {
         return ~0u;
+    }
+    {
+        u32 placed = 0;
+        for (u32 i = 0; i < PoolSize; ++i) {
+            placed += memory.Read64(pool + PoolSlots + i * 8) != 0 ? 1 : 0;
+        }
+        Census(memory, pool, placed);
     }
     ++g_log_ticks;
     if (free != g_logged_free && (g_log_ticks >= 12 || free <= 2)) { // at most every 3 s
