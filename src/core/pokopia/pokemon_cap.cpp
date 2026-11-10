@@ -214,9 +214,11 @@ void OnSpawnResult(Core::System&, Kernel::Svc::ThreadContext& ctx) {
 constexpr u64 SummonEnterSite = 0x1c9e48;  // mov w0, w1: w1 the Pokémon, w2, w3
 constexpr u64 SummonNewSite = 0x1c9e80;    // not in the world yet (the "already there" exit passed)
 constexpr u64 SummonStageSite = 0x1c9e9c;  // cmp w8, #0xe1: comparison operand and context
-// The next instruction consumes the flags set by the comparison above. Hook here to record
-// NZCV before the original branch executes, identifying the branch selected for each request.
+// 0x540001c3 at +0x1c9ea0 decodes to B.LO, target +0x1c9ed8. Probe both destinations
+// to prove which side executes before diagnosing the downstream rejection.
 constexpr u64 SummonGateBranchSite = 0x1c9ea0;
+constexpr u64 SummonGateFallthroughSite = 0x1c9ea4;
+constexpr u64 SummonGateTakenTargetSite = 0x1c9ed8;
 constexpr u64 SummonResultSite = 0x1c9f84; // mov x21, x0: what the spawner made
 constexpr u64 ArrivalSite = 0x1c9bb8;      // cmp w24, w23 in main+0x1c9ae0: counted vs the limit
 std::atomic<u32> g_summon_id{0};
@@ -243,13 +245,29 @@ void OnSummonStage(Core::System&, Kernel::Svc::ThreadContext& ctx) {
 }
 void OnSummonGateBranch(Core::System&, Kernel::Svc::ThreadContext& ctx) {
     const u32 nzcv = (ctx.pstate >> 28) & 0xf;
+    const bool carry = (nzcv & 2) != 0;
     LOG_INFO(Loader,
-             "Pokopia summon: Pokémon {:#x}: post-cmp branch at main+0x1c9ea0; "
-             "NZCV={:04b} (N={} Z={} C={} V={}); w8={:#x} w19={:#x} "
-             "x0={:#x} x1={:#x} x20={:#x} x21={:#x} x24={:#x}",
+             "Pokopia summon: Pokémon {:#x}: B.LO at main+0x1c9ea0; "
+             "NZCV={:04b} (N={} Z={} C={} V={}); w8={:#x} w19={:#x}; "
+             "B.LO {} to main+0x1c9ed8; x0={:#x} x1={:#x} "
+             "x20={:#x} x21={:#x} x24={:#x}",
              g_summon_id.load(), nzcv, (nzcv & 8) != 0, (nzcv & 4) != 0,
-             (nzcv & 2) != 0, (nzcv & 1) != 0, ctx.r[8] & 0xffffffff,
-             ctx.r[19] & 0xffffffff, ctx.r[0], ctx.r[1], ctx.r[20], ctx.r[21], ctx.r[24]);
+             carry, (nzcv & 1) != 0, ctx.r[8] & 0xffffffff,
+             ctx.r[19] & 0xffffffff, !carry ? "TAKEN" : "not taken",
+             ctx.r[0], ctx.r[1], ctx.r[20], ctx.r[21], ctx.r[24]);
+}
+void OnSummonGateFallthrough(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    LOG_INFO(Loader,
+             "Pokopia summon: Pokémon {:#x}: reached B.LO fall-through +0x1c9ea4; "
+             "x0={:#x} x1={:#x} x19={:#x} x20={:#x} x21={:#x} x24={:#x}",
+             g_summon_id.load(), ctx.r[0], ctx.r[1], ctx.r[19], ctx.r[20], ctx.r[21], ctx.r[24]);
+}
+void OnSummonGateTakenTarget(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    LOG_INFO(Loader,
+             "Pokopia summon: Pokémon {:#x}: reached B.LO target +0x1c9ed8; "
+             "x0={:#x} x1={:#x} x8={:#x} x19={:#x} x20={:#x} x21={:#x} x24={:#x}",
+             g_summon_id.load(), ctx.r[0], ctx.r[1], ctx.r[8] & 0xffffffff,
+             ctx.r[19], ctx.r[20], ctx.r[21], ctx.r[24]);
 }
 
 void OnSummonResult(Core::System&, Kernel::Svc::ThreadContext& ctx) {
@@ -443,6 +461,10 @@ void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base
         hooks->Add(SummonNewSite, &OnSummonNew, "Pokémon summon trace (new)");
         hooks->Add(SummonStageSite, &OnSummonStage, "Pokémon summon trace (comparison)");
         hooks->Add(SummonGateBranchSite, &OnSummonGateBranch, "Pokémon summon trace (branch flags)");
+        hooks->Add(SummonGateFallthroughSite, &OnSummonGateFallthrough,
+                   "Pokémon summon trace (branch fall-through)");
+        hooks->Add(SummonGateTakenTargetSite, &OnSummonGateTakenTarget,
+                   "Pokémon summon trace (branch taken target)");
         hooks->Add(SummonResultSite, &OnSummonResult, "Pokémon summon trace (result)");
         hooks->Add(ArrivalSite, &OnArrival, "Pokémon arrivals trace");
     }
