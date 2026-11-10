@@ -221,6 +221,13 @@ constexpr u64 SummonGateFallthroughSite = 0x1c9ea4;
 constexpr u64 SummonGateTakenTargetSite = 0x1c9ed8;
 constexpr u64 SummonResultSite = 0x1c9f84; // mov x21, x0: what the spawner made
 constexpr u64 ArrivalSite = 0x1c9bb8;      // cmp w24, w23 in main+0x1c9ae0: counted vs the limit
+// Follow the ordinary-Pokémon eligibility path entered when kind < 0x400. These sites
+// capture the lookup output and the branches which can return null before the spawner.
+constexpr u64 ResidentLookupResultSite = 0x1ca100; // first instruction after BL main+0x284a68
+constexpr u64 ResidentAreaBranchSite = 0x1ca138;    // B.NE -> common null return at 0x1c9eac
+constexpr u64 ResidentPointerBranchSite = 0x1ca174; // CBZ X22 -> common null return at 0x1c9eac
+constexpr u64 ResidentSlotBranchSite = 0x1ca3dc;    // B.LO -> common null return at 0x1c9eac
+constexpr u64 SummonNullReturnSite = 0x1c9eac;       // MOV X21, XZR: common no-object return
 std::atomic<u32> g_summon_id{0};
 
 void OnSummonEnter(Core::System&, Kernel::Svc::ThreadContext& ctx) {
@@ -268,6 +275,44 @@ void OnSummonGateTakenTarget(Core::System&, Kernel::Svc::ThreadContext& ctx) {
              "x0={:#x} x1={:#x} x8={:#x} x19={:#x} x20={:#x} x21={:#x} x24={:#x}",
              g_summon_id.load(), ctx.r[0], ctx.r[1], ctx.r[8] & 0xffffffff,
              ctx.r[19], ctx.r[20], ctx.r[21], ctx.r[24]);
+}
+
+void OnResidentLookupResult(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    LOG_INFO(Loader,
+             "Pokopia summon: Pokémon {:#x}: resident lookup result w0={:#x}; "
+             "current w19={:#x}; adjusted kind w20={:#x}; resident flags w28={:#x}; "
+             "resident data x27={:#x}",
+             g_summon_id.load(), ctx.r[0] & 0xffffffff, ctx.r[19] & 0xffffffff,
+             ctx.r[20] & 0xffffffff, ctx.r[28] & 0xffffffff, ctx.r[27]);
+}
+void OnResidentAreaBranch(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    const u32 nzcv = (ctx.pstate >> 28) & 0xf;
+    LOG_INFO(Loader,
+             "Pokopia summon: Pokémon {:#x}: area lookup compare; w19={:#x}, "
+             "lookup w0={:#x}, NZCV={:04b}; B.NE to null return {}",
+             g_summon_id.load(), ctx.r[19] & 0xffffffff, ctx.r[0] & 0xffffffff,
+             nzcv, (nzcv & 4) == 0 ? "TAKEN" : "not taken");
+}
+void OnResidentPointerBranch(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    LOG_INFO(Loader,
+             "Pokopia summon: Pokémon {:#x}: resident manager pointer check; "
+             "x22={:#x}; CBZ to null return {}",
+             g_summon_id.load(), ctx.r[22], ctx.r[22] == 0 ? "TAKEN" : "not taken");
+}
+void OnResidentSlotBranch(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    const u32 nzcv = (ctx.pstate >> 28) & 0xf;
+    LOG_INFO(Loader,
+             "Pokopia summon: Pokémon {:#x}: resident slot check; w8={:#x}, w19={:#x}, "
+             "NZCV={:04b}; B.LO to null return {}",
+             g_summon_id.load(), ctx.r[8] & 0xffffffff, ctx.r[19] & 0xffffffff,
+             nzcv, (nzcv & 2) == 0 ? "TAKEN" : "not taken");
+}
+void OnSummonNullReturn(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    LOG_INFO(Loader,
+             "Pokopia summon: Pokémon {:#x}: reached common null-return block "
+             "main+0x1c9eac; w19={:#x} w20={:#x} w28={:#x} x22={:#x} x27={:#x}",
+             g_summon_id.load(), ctx.r[19] & 0xffffffff, ctx.r[20] & 0xffffffff,
+             ctx.r[28] & 0xffffffff, ctx.r[22], ctx.r[27]);
 }
 
 void OnSummonResult(Core::System&, Kernel::Svc::ThreadContext& ctx) {
@@ -466,6 +511,16 @@ void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base
         hooks->Add(SummonGateTakenTargetSite, &OnSummonGateTakenTarget,
                    "Pokémon summon trace (branch taken target)");
         hooks->Add(SummonResultSite, &OnSummonResult, "Pokémon summon trace (result)");
+        hooks->Add(ResidentLookupResultSite, &OnResidentLookupResult,
+                   "Pokémon summon trace (resident lookup result)");
+        hooks->Add(ResidentAreaBranchSite, &OnResidentAreaBranch,
+                   "Pokémon summon trace (resident area branch)");
+        hooks->Add(ResidentPointerBranchSite, &OnResidentPointerBranch,
+                   "Pokémon summon trace (resident pointer branch)");
+        hooks->Add(ResidentSlotBranchSite, &OnResidentSlotBranch,
+                   "Pokémon summon trace (resident slot branch)");
+        hooks->Add(SummonNullReturnSite, &OnSummonNullReturn,
+                   "Pokémon summon trace (common null return)");
         hooks->Add(ArrivalSite, &OnArrival, "Pokémon arrivals trace");
     }
     g_cap = static_cast<u32>(std::clamp<long>(requested, 0, MaxCap));
