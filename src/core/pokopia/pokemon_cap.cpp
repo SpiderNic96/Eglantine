@@ -213,9 +213,15 @@ void OnSpawnResult(Core::System&, Kernel::Svc::ThreadContext& ctx) {
 // arrivals, probably Honey); its early exits decide before the spawner is ever called.
 constexpr u64 SummonEnterSite = 0x1c9e48;  // mov w0, w1: w1 the Pokémon, w2, w3
 constexpr u64 SummonNewSite = 0x1c9e80;    // not in the world yet (the "already there" exit passed)
-constexpr u64 SummonStageSite = 0x1c9e9c;  // cmp w8, #0xe1: w0 its area, w19 the area here
+constexpr u64 SummonStageSite = 0x1c9e9c;  // cmp w8, #0xe1: comparison operand and context
 constexpr u64 SummonResultSite = 0x1c9f84; // mov x21, x0: what the spawner made
 constexpr u64 ArrivalSite = 0x1c9bb8;      // cmp w24, w23 in main+0x1c9ae0: counted vs the limit
+// m_bPopByItem xref: [x20+0x26], then bit-3 tests around a helper call. Trace each
+// decision before the original branch executes; this is diagnostic only, no branch is changed.
+constexpr u64 ItemPopFlagTestSite = 0x5e3078; // tbnz w8, #3, 0x5e30d0
+constexpr u64 ItemPopPointerTestSite = 0x5e3088; // cbz x0, 0x5e30d0
+constexpr u64 ItemPopHelperTestSite = 0x5e30a0; // tbnz w0, #0, 0x5e30d0
+constexpr u64 ItemPopFlagRetestSite = 0x5e30b0; // tbz w8, #3, 0x5e30f0
 std::atomic<u32> g_summon_id{0};
 
 void OnSummonEnter(Core::System&, Kernel::Svc::ThreadContext& ctx) {
@@ -238,6 +244,34 @@ void OnSummonStage(Core::System&, Kernel::Svc::ThreadContext& ctx) {
              ctx.r[0], ctx.r[1], ctx.r[2], ctx.r[3], ctx.r[20], ctx.r[21], ctx.r[22],
              ctx.r[23], ctx.r[24]);
 }
+void OnItemPopFlagTest(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    const u32 flag = static_cast<u32>(ctx.r[8]) & 0xff;
+    LOG_INFO(Loader,
+             "Pokopia item-pop: summon context {:#x}, gate 0x5e3078 TBNZ W8,#3; "
+             "field={:#04x} bit3={} x20={:#x} x21={:#x}",
+             g_summon_id.load(), flag, (flag & 8) != 0, ctx.r[20], ctx.r[21]);
+}
+void OnItemPopPointerTest(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    LOG_INFO(Loader,
+             "Pokopia item-pop: summon context {:#x}, gate 0x5e3088 CBZ X0; "
+             "x0={:#x} x20={:#x} x21={:#x}",
+             g_summon_id.load(), ctx.r[0], ctx.r[20], ctx.r[21]);
+}
+void OnItemPopHelperTest(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    const u32 result = static_cast<u32>(ctx.r[0]);
+    LOG_INFO(Loader,
+             "Pokopia item-pop: summon context {:#x}, gate 0x5e30a0 TBNZ W0,#0; "
+             "helper_result={:#x} bit0={} x20={:#x} x21={:#x}",
+             g_summon_id.load(), result, (result & 1) != 0, ctx.r[20], ctx.r[21]);
+}
+void OnItemPopFlagRetest(Core::System&, Kernel::Svc::ThreadContext& ctx) {
+    const u32 flag = static_cast<u32>(ctx.r[8]) & 0xff;
+    LOG_INFO(Loader,
+             "Pokopia item-pop: summon context {:#x}, gate 0x5e30b0 TBZ W8,#3; "
+             "field={:#04x} bit3={} x20={:#x} x21={:#x}",
+             g_summon_id.load(), flag, (flag & 8) != 0, ctx.r[20], ctx.r[21]);
+}
+
 void OnSummonResult(Core::System&, Kernel::Svc::ThreadContext& ctx) {
     LOG_INFO(Loader, "Pokopia summon: Pokémon {:#x}: {}", g_summon_id.load(),
              ctx.r[0] != 0 ? std::string{"made"} : std::string{"NOT made by the spawner"});
@@ -429,6 +463,10 @@ void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base
         hooks->Add(SummonNewSite, &OnSummonNew, "Pokémon summon trace (new)");
         hooks->Add(SummonStageSite, &OnSummonStage, "Pokémon summon trace (area)");
         hooks->Add(SummonResultSite, &OnSummonResult, "Pokémon summon trace (result)");
+        hooks->Add(ItemPopFlagTestSite, &OnItemPopFlagTest, "Pokémon item-pop trace (flag)");
+        hooks->Add(ItemPopPointerTestSite, &OnItemPopPointerTest, "Pokémon item-pop trace (pointer)");
+        hooks->Add(ItemPopHelperTestSite, &OnItemPopHelperTest, "Pokémon item-pop trace (helper)");
+        hooks->Add(ItemPopFlagRetestSite, &OnItemPopFlagRetest, "Pokémon item-pop trace (flag retest)");
         hooks->Add(ArrivalSite, &OnArrival, "Pokémon arrivals trace");
     }
     g_cap = static_cast<u32>(std::clamp<long>(requested, 0, MaxCap));
