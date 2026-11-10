@@ -227,8 +227,16 @@ void OnSummonNew(Core::System&, Kernel::Svc::ThreadContext&) {
     LOG_INFO(Loader, "Pokopia summon: Pokémon {:#x}: not in the world yet", g_summon_id.load());
 }
 void OnSummonStage(Core::System&, Kernel::Svc::ThreadContext& ctx) {
-    LOG_INFO(Loader, "Pokopia summon: Pokémon {:#x}: its area {:#x}, this area {:#x}",
-             g_summon_id.load(), ctx.r[0] & 0xff, ctx.r[19] & 0xff);
+    // This site is CMP W8, #0xe1. W0 is not the compared value, so do not label it
+    // as the Pokémon's area. Capture the actual compare operand and the surrounding
+    // registers needed to identify which record/flag is being tested.
+    LOG_INFO(Loader,
+             "Pokopia summon: Pokémon {:#x}: cmp w8={:#x} with 0xe1; "
+             "w19={:#x}; x0={:#x} x1={:#x} x2={:#x} x3={:#x} "
+             "x20={:#x} x21={:#x} x22={:#x} x23={:#x} x24={:#x}",
+             g_summon_id.load(), ctx.r[8] & 0xffffffff, ctx.r[19] & 0xffffffff,
+             ctx.r[0], ctx.r[1], ctx.r[2], ctx.r[3], ctx.r[20], ctx.r[21], ctx.r[22],
+             ctx.r[23], ctx.r[24]);
 }
 void OnSummonResult(Core::System&, Kernel::Svc::ThreadContext& ctx) {
     LOG_INFO(Loader, "Pokopia summon: Pokémon {:#x}: {}", g_summon_id.load(),
