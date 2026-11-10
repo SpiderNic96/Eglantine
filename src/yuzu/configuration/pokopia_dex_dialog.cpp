@@ -34,7 +34,11 @@ constexpr quint32 Layout201 = 0x0200017D; // 2.0.1's common save
 constexpr quint32 Format = 0x40001;
 constexpr int HeaderSize = 0x130;
 constexpr int DataSize = 0x470CED;
-constexpr int DexOffset = 0x221758; // a byte per resident; bit 0: registered
+// No verified offset in the decompressed CMNDAT.BIN payload yet. The 2.0.1 disassembly places
+// m_pokemonDexHistory and m_pokemonDexReadHistory at runtime serializer offsets +0x6FA09C and
+// +0x6FA49C (0x400 bytes each); those are outside DataSize and cannot be used as raw save offsets
+// without first mapping the serializer's x20 base. The previous 0x221758 guess was disproven.
+constexpr int DexOffset = -1;
 constexpr int DexCount = 1050;
 constexpr int IdRole = Qt::UserRole;
 
@@ -224,6 +228,12 @@ void PokopiaDexDialog::LoadSave(const QString& path) {
         save_button->setEnabled(false);
         return;
     }
+    if (DexOffset < 0 || DexOffset > data.size() - DexCount) {
+        status->setText(tr("The Pokédex save offset is not verified for this save layout. "
+                           "The editor is locked to protect your save; no bytes were changed."));
+        save_button->setEnabled(false);
+        return;
+    }
     for (int id = 0; id < DexCount; ++id) {
         if (static_cast<quint8>(data[DexOffset + id]) & 1) {
             registered.insert(id);
@@ -288,7 +298,7 @@ void PokopiaDexDialog::Filter(const QString& text) {
 }
 
 void PokopiaDexDialog::Save() {
-    if (data.isEmpty() || game_running) {
+    if (data.isEmpty() || game_running || DexOffset < 0 || DexOffset > data.size() - DexCount) {
         return;
     }
     QByteArray edited = data;

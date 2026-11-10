@@ -31,8 +31,12 @@ constexpr u64 ParamsGlobal = 0x36ca678; // -> object whose +0x20 holds the game'
 constexpr u64 ParamsField = 0x20;
 constexpr u64 LivingLimit = 0x4bc;  // Pokémon that may live in the world (25)
 constexpr u64 ObjectLimit = 0x4c0;  // all Pokémon objects, the spawner's hard stop (30)
-constexpr u32 MaxCap = 50;          // the object pool has 64 slots; leave room for visitors
-constexpr u32 MaxObjects = 56;
+// The game has a fixed 64-entry Pokémon object pool. Keep the user-facing resident cap at 50
+// and reserve the remaining 14 entries for transient visitors / item-triggered spawns.
+constexpr u32 PoolSize = 64;
+constexpr u32 MaxCap = 50;
+constexpr u32 VisitorReserve = PoolSize - MaxCap;
+constexpr u32 MaxObjects = PoolSize;
 
 // The world's residents list (main+0x3561928): +0x2a0 data, +0x2ac count. Empty while loading.
 constexpr u64 ResidentsGlobal = 0x3561928;
@@ -59,7 +63,6 @@ constexpr std::chrono::nanoseconds CheckNs{std::chrono::milliseconds{250}};
 // stop while SlotReserve or fewer are free.
 constexpr u64 PoolGlobal = 0x3483bd0;
 constexpr u64 PoolSlots = 0x50, PoolFree = 0x6608;
-constexpr u32 PoolSize = 64;
 constexpr u32 SlotReserve = 10;
 constexpr u32 SettleTicks = 12; // 3 s in play before the first step
 constexpr u32 StepTicks = 12;   // then a step every 3 s
@@ -289,11 +292,13 @@ bool ResidentsLoaded(Core::Memory::Memory& memory) {
 }
 
 void Write(Core::Memory::Memory& memory, u64 params, u32 living) {
-    const u32 headroom = g_seen.objects > g_seen.living ? g_seen.objects - g_seen.living : 0;
-    const u32 objects =
-        living == g_seen.living
-            ? g_seen.objects
-            : std::clamp(std::max(g_seen.objects, living + headroom), living, MaxObjects);
+    // The hard limit counts every live Pokémon object, not just residents. The previous code
+    // carried forward only the game's original 5-object gap (30 objects - 25 living), which
+    // capped a 50-resident configuration at 56 objects even though the verified pool has 64
+    // entries. Keep 14 entries available for transient visitors / item-triggered spawns, but
+    // never raise the limit beyond the pool's actual capacity.
+    const u32 objects = std::clamp(std::max(g_seen.objects, living + VisitorReserve), living,
+                                   MaxObjects);
     if (memory.Read32(params + LivingLimit) != living) {
         memory.Write32(params + LivingLimit, living);
     }

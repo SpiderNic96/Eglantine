@@ -11,11 +11,11 @@ on:
         description: "Platforms to build: all, or some of windows-x86_64, linux-x86_64, linux-aarch64, macos-arm64, android-arm64 (comma-separated)"
         type: string
         default: all
-  # SpiderNic96's fork: builds the Joy-Con 2 mouse branch (jc2-mouse-recompia-fixes plus this file)
-  # for every platform. Merge jc2-mouse-recompia-fixes in and push to rebuild.
+  # Build the active Pikantine branch on every binary-affecting push. workflow_dispatch remains
+  # available for one-off platform rebuilds.
   push:
     branches:
-      - jc2-mouse-builds
+      - main
     # A binary only changes when build inputs change; docs-only pushes skip the build.
     paths:
       - "src/**"
@@ -670,7 +670,7 @@ jobs:
           retention-days: 7
 
   # Publishes the binaries as a GitHub pre-release, tagged <channel>-build-<number>: on pushes to
-  # jc2-mouse-builds, and on manual runs unless "Publish the binaries as a GitHub release" is
+  # main, and on manual runs unless "Publish the binaries as a GitHub release" is
   # unticked. A platform that failed to build is left out instead of holding back the others.
   release:
     name: Publish release
@@ -748,7 +748,7 @@ jobs:
             fi
           }
           {
-            echo "Automatic build of \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA}: notsapinho/Eglantine plus the Joy-Con 2 mouse fixes (notsapinho/Eglantine#3)."
+            echo "Automatic Pikantine build of \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA}."
             echo
             echo "Experimental and untested. The Windows and Linux packages use clang with profile-guided optimization; the x86_64 ones need a CPU with AVX2 (Intel Haswell or AMD Ryzen and newer)."
             echo

@@ -43,8 +43,10 @@ ConfigurePikantine::ConfigurePikantine(const Core::System& system_, QWidget* par
     pokemon_cap->setSpecialValueText(tr("Game's own (25)"));
     cap_layout->addRow(tr("Pokémon living in your world"), pokemon_cap);
     pokemon_cap_note = new QLabel(
-        tr("Up to 50, per area. The game places Pokémon while an area loads, so a higher number "
-           "makes entering an area slower (around 30 stays quick). Changes apply from the next "
+        tr("Up to 50 residents, with the 64-entry object pool keeping up to 14 additional slots "
+           "for transient visitors and item-triggered spawns. The game places Pokémon while an "
+           "area loads, so a higher number makes entering an area slower (around 30 stays quick). "
+           "Changes apply from the next "
            "area you enter.<br><b>Back up your save first:</b> going back to a lower limit may have the "
            "game send the extra Pokémon away."),
         cap_box);
@@ -60,13 +62,16 @@ ConfigurePikantine::ConfigurePikantine(const Core::System& system_, QWidget* par
     auto* dex_box = new QGroupBox(tr("Pokédex"), this);
     auto* dex_layout = new QVBoxLayout(dex_box);
     auto* dex_note = new QLabel(
-        tr("<b>Off for now:</b> the save flag the editor changed turned out not to be the "
-           "Pokédex, so ticked Pokémon did not register. If you saved with it, put your save back "
-           "from the <b>pikantine_backups</b> folder in Eglantine's folder (Pikantine build 34)."),
+        tr("<b>Off for now:</b> the Pokédex histories are confirmed by the 2.0.1 serializer at "
+           "runtime offsets <code>+0x6FA09C</code> and <code>+0x6FA49C</code> (0x400 bytes each), "
+           "but those addresses are outside the current decompressed CMNDAT.BIN buffer. The "
+           "runtime-to-save mapping and Pokémon-to-Dex ID mapping still need verification; the "
+           "editor stays disabled to avoid corrupting saves. The old build-34 flag was not the "
+           "Pokédex."),
         dex_box);
     dex_note->setWordWrap(true);
     auto* dex_button = new QPushButton(tr("Open the Pokédex editor…"), dex_box);
-    dex_button->setEnabled(false); // until the Pokédex's own save data is found
+    dex_button->setEnabled(false); // runtime history arrays are not mapped into CMNDAT.BIN yet
     dex_button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
     connect(dex_button, &QPushButton::clicked, this, [this] {
         PokopiaDexDialog dialog(system.IsPoweredOn(), this);

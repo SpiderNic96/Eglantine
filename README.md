@@ -19,7 +19,7 @@
 
 > [!NOTE]
 > **Pikantine** is SpiderNic96's `Pikantine` branch of [notsapinho/Eglantine](https://github.com/notsapinho/Eglantine), with Pokémon Pokopia (2.0.1) extras: keyboard and mouse play, a live minimap with pings, and more Pokémon living in your world.
-> Builds: [Releases](https://github.com/SpiderNic96/Eglantine/releases), tagged `pokecap-build-<n>` (Windows x64 for now). The upstream README follows the comparison below.
+> Builds: [GitHub Releases](https://github.com/SpiderNic96/Pikantine/releases), tagged `pokecap-build-<n>`. All configured platforms build automatically on pushes to `main`; individual platforms can also be rebuilt with the Actions workflow dispatcher.
 
 ## What Pikantine adds over notsapinho's Eglantine
 
@@ -36,7 +36,7 @@ Everything here is for **Pokémon Pokopia 2.0.1** (build ID `76A489F3…`), only
 | Settings | — | A **Pikantine** page in Settings: minimap on or off, the Pokémon limit (a Pokédex editor is coming) |
 | Waypoints | — | A **ping** with an arrow and its distance at the top of the screen; set it with **G**, a click on the pause menu's map, **L3+R3**, or the **right stick and R3 on the pause map** |
 | Pokémon limit | The game's own (25 living, 30 in all) | **Up to 50** (default 30); raised a couple at a time once you are in play, so loading stays fast |
-| Builds | Every platform, on pushes to `main` | Windows by hand per run; channels `mouse-build-<n>` (mouse and minimap) and `pokecap-build-<n>` (Pikantine) |
+| Builds | Every platform, on pushes to `main` | Every configured platform, on pushes to `main`; channel `pokecap-build-<n>` |
 
 ### Live minimap and ping
 
