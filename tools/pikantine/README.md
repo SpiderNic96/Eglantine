@@ -39,3 +39,11 @@ save stores slots, not Pokédex numbers). Writes `pikantine_dex_slots.json` next
 back so the Pokédex editor can show names. Needs `pip install numpy`.
 
     python find_dex_table.py "C:\path\to\romfs"
+
+## find_dex_names.py
+
+Second try at the Pokédex slot order, from the game's text: finds lists of Pokémon names whose
+positions follow the known slots. Writes `pikantine_dex_names.json` next to itself. No packages
+needed.
+
+    python find_dex_names.py "C:\path\to\romfs"
