@@ -31,3 +31,11 @@ built and discovered, and the dex rewards claimed. The layout behind it is in
 [docs/pokecap/save-layout.md](../../docs/pokecap/save-layout.md).
 
     python dex_report.py "%APPDATA%\eglantine\nand\user\save\...\G00\CMNDAT.BIN"
+
+## find_dex_table.py
+
+Read-only: searches a RomFS dump for the table that says which Pokémon each Pokédex slot is (the
+save stores slots, not Pokédex numbers). Writes `pikantine_dex_slots.json` next to itself; send it
+back so the Pokédex editor can show names. Needs `pip install numpy`.
+
+    python find_dex_table.py "C:\path\to\romfs"
