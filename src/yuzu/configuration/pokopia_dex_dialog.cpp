@@ -509,7 +509,7 @@ void PokopiaDexDialog::Save() {
         if (slot <= 0 || slot >= DexCount) {
             continue;
         }
-        if (want == 2 && link_habitats->isChecked()) {
+        if (want == 2 && dex_state.value(slot) != 2 && link_habitats->isChecked()) {
             for (const auto& p : Pikantine::PokopiaDexSlots) {
                 if (p.slot != slot) {
                     continue;
@@ -582,10 +582,14 @@ void PokopiaDexDialog::Save() {
 
     const QString backups = QString::fromStdString(Common::FS::PathToUTF8String(
         Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir) / "pikantine_backups"));
-    const QString backup = QDir(backups).filePath(
-        QStringLiteral("%1-%2").arg(QLatin1String(TitleFolder),
-                                    QDateTime::currentDateTime().toString(
-                                        QStringLiteral("yyyyMMdd-HHmmss"))));
+    // A new folder for every save, even two in the same second.
+    const QString stamp = QStringLiteral("%1-%2").arg(
+        QLatin1String(TitleFolder),
+        QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss")));
+    QString backup = QDir(backups).filePath(stamp);
+    for (int n = 2; QFileInfo::exists(backup); ++n) {
+        backup = QDir(backups).filePath(QStringLiteral("%1-%2").arg(stamp).arg(n));
+    }
     if (!CopyFolder(folder, backup)) {
         QMessageBox::critical(this, windowTitle(),
                               tr("Could not back the save up to %1; nothing was changed.")
