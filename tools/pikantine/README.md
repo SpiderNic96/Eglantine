@@ -47,3 +47,12 @@ positions follow the known slots. Writes `pikantine_dex_names.json` next to itse
 needed.
 
     python find_dex_names.py "C:\path\to\romfs"
+
+## find_resident_table.py
+
+Third try, from what the game's code does: the Pokédex slot of a Pokémon is a field of its row in
+the resident table. Finds that table in a RomFS dump (each Pokémon living in two real towns must
+point at a slot its town has registered) and writes `pikantine_resident_table.json`, resident id
+→ slot, numbers only. Needs `pip install numpy`; takes several minutes.
+
+    python find_resident_table.py "C:\path\to\romfs"

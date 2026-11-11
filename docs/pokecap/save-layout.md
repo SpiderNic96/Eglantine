@@ -31,9 +31,13 @@ in the game's save code. Check any save with `tools/pikantine/dex_report.py` (re
 - Bits 0 and 1 together: **registered** (45 in SpiderNic96's save, the number the game showed;
   144 in a tester's with 139 residents).
 - Bit 3: seen only (a silhouette). Bit 2: unknown yet.
-- The slot is the game's own index. The in-game "Numerical order" follows it, but it is **not**
-  the printed Pokédex number (Pidgey, No. 010, is slot 13). The slot → species table is in the
-  game's data files, not in the save; it is the last piece an editor with names needs.
+- The slot is the game's own Pokédex id (1–999), **not** the printed Pokédex number (Pidgey,
+  No. 010, is slot 13). The code reads it as `[main+0x3561930] + 0x6FA1A4 + id` (getters such as
+  `main+0x5bd458`; the save root is 0x108 below the serializer's own base).
+- To register a Pokémon the game looks its **resident id** up in data table `+0x8d0` (slot 0x11a
+  of the table manager at `[main+0x35618f0]`) and takes the `u16` at row `+0x28` as the Pokédex id
+  (`main+0xa982c0` sets bit 0, `main+0xa983d4` bit 1). So resident id → slot comes from that
+  table; `tools/pikantine/find_resident_table.py` finds it in a RomFS dump.
 
 ## Not in these fields
 
