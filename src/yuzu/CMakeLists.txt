@@ -128,6 +128,10 @@ add_executable(yuzu
     configuration/pokopia_dex_dialog.h
     configuration/pokopia_dex_data.h
     configuration/pokopia_recipe_data.h
+    configuration/pokopia_flag_info.h
+    configuration/pokopia_save_names.h
+    configuration/pokopia_save_tabs.cpp
+    configuration/pokopia_save_tabs.h
     configuration/configure_network.h
     configuration/configure_network.ui
     configuration/configure_system.cpp

@@ -7,6 +7,8 @@
 #include <QDialog>
 #include <QHash>
 #include <QSet>
+#include <QStringList>
+#include <QVector>
 
 class QCheckBox;
 class QComboBox;
@@ -15,8 +17,18 @@ class QLineEdit;
 class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
+class PokopiaSaveTab;
 
-/// Pikantine's Pokédex and Habitat Dex editor for Pokémon Pokopia 2.0.1 saves.
+/// A console user profile, so saves can be listed by whose they are. `keys` are the folder names
+/// the emulator may keep that user's saves under (the user id as 32 hex digits, two spellings).
+struct PokopiaProfile {
+    QString name;
+    QStringList keys;
+    bool current{};
+};
+
+/// Pikantine's save editor for Pokémon Pokopia 2.0.1: Pokédex, habitats and recipes here, and the
+/// moves, reactions, bag, residents and function flags tabs of pokopia_save_tabs.h.
 ///
 /// The common save (G00/CMNDAT.BIN: a 0x130-byte header, then zlib) keeps a byte per Pokédex
 /// slot at 0x426EFF of its data (bits 0+1 registered, bit 3 seen) and 12 bytes per habitat id at
@@ -27,7 +39,9 @@ class PokopiaDexDialog : public QDialog {
     Q_OBJECT
 
 public:
-    explicit PokopiaDexDialog(bool game_running, QWidget* parent = nullptr);
+    /// Lists the saves found, by profile; opens the current profile's, or asks whose to edit.
+    PokopiaDexDialog(bool game_running, QVector<PokopiaProfile> profiles,
+                     QWidget* parent = nullptr);
     ~PokopiaDexDialog() override;
 
 private:
@@ -37,6 +51,8 @@ private:
     void UpdateCount();
     void Save();
     void Refilter();
+    void PickStartingSave();
+    QString OwnerOf(const QString& folder) const;
 
     QComboBox* folders{};
     QLabel* status{};
@@ -51,6 +67,8 @@ private:
     QCheckBox* link_habitats{};
     QCheckBox* fill_sightings{};
     QPushButton* save_button{};
+    QVector<PokopiaSaveTab*> extra_tabs; // applied in this order (flags first)
+    QVector<PokopiaProfile> profiles;
 
     bool game_running{};
     QString folder;   // the save folder (holds G00)

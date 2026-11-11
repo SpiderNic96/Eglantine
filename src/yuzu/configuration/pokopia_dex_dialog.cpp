@@ -4,6 +4,7 @@
 #include "yuzu/configuration/pokopia_dex_dialog.h"
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 #include <QCheckBox>
@@ -16,12 +17,14 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSet>
 #include <QTabWidget>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QtEndian>
@@ -29,6 +32,7 @@
 #include "common/fs/path_util.h"
 #include "yuzu/configuration/pokopia_dex_data.h"
 #include "yuzu/configuration/pokopia_recipe_data.h"
+#include "yuzu/configuration/pokopia_save_tabs.h"
 
 namespace {
 
@@ -198,10 +202,11 @@ bool CopyFolder(const QString& from, const QString& to) {
 
 } // namespace
 
-PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
-    : QDialog(parent), game_running{game_running_} {
-    setWindowTitle(tr("Pikantine: Pokopia Pokédex and habitats"));
-    resize(760, 700);
+PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QVector<PokopiaProfile> profiles_,
+                                   QWidget* parent)
+    : QDialog(parent), profiles{std::move(profiles_)}, game_running{game_running_} {
+    setWindowTitle(tr("Pikantine: Pokopia save editor"));
+    resize(800, 720);
     auto* layout = new QVBoxLayout(this);
 
     auto* note = new QLabel(
@@ -270,6 +275,24 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
     recipe_layout->addWidget(recipe_search);
     recipe_layout->addWidget(recipe_list, 1);
     tabs->addTab(recipe_page, tr("Recipes"));
+
+    // Flags go first so the moves tab's unlocks (which are flags too) win over a stale tick.
+    const QString labels = QString::fromStdString(Common::FS::PathToUTF8String(
+        Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir) / "pikantine_flag_labels.json"));
+    auto* flags_tab = new PokopiaFlagsTab(labels, tabs);
+    auto* skills_tab = new PokopiaSkillsTab(tabs);
+    auto* reactions_tab = new PokopiaReactionsTab(tabs);
+    auto* items_tab = new PokopiaItemsTab(tabs);
+    auto* villagers_tab = new PokopiaVillagersTab(tabs);
+    extra_tabs = {flags_tab, skills_tab, reactions_tab, items_tab, villagers_tab};
+    tabs->addTab(skills_tab, tr("Moves"));
+    tabs->addTab(reactions_tab, tr("Reactions"));
+    tabs->addTab(items_tab, tr("Bag"));
+    tabs->addTab(villagers_tab, tr("Residents"));
+    tabs->addTab(flags_tab, tr("Flags"));
+    for (auto* tab : extra_tabs) {
+        connect(tab, &PokopiaSaveTab::Changed, this, &PokopiaDexDialog::UpdateCount);
+    }
     layout->addWidget(tabs, 1);
 
     link_habitats = new QCheckBox(
@@ -312,6 +335,9 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
             folders->setCurrentIndex(folders->count() - 1);
         }
     });
+    connect(tabs, &QTabWidget::currentChanged, this, [tick_shown](int index) {
+        tick_shown->setEnabled(index <= 2); // the Pokédex, habitat and recipe lists
+    });
     connect(folders, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (index >= 0) {
             LoadSave(folders->itemData(index).toString());
@@ -353,7 +379,15 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
             }
         }
     });
-    connect(reset, &QPushButton::clicked, this, &PokopiaDexDialog::Populate);
+    connect(reset, &QPushButton::clicked, this, [this] {
+        Populate();
+        if (!data.isEmpty()) {
+            for (auto* tab : extra_tabs) {
+                tab->Load(data);
+            }
+            UpdateCount();
+        }
+    });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(save_button, &QPushButton::clicked, this, &PokopiaDexDialog::Save);
 
@@ -368,22 +402,72 @@ void PokopiaDexDialog::Refilter() {
     Filter(recipe_list, recipe_search->text());
 }
 
+QString PokopiaDexDialog::OwnerOf(const QString& path) const {
+    // Saves live in .../<user id>/0400A3A01EE4C000; match the user id to a profile.
+    const QString user = QFileInfo(path).dir().dirName();
+    for (const auto& p : profiles) {
+        for (const auto& key : p.keys) {
+            if (user.compare(key, Qt::CaseInsensitive) == 0) {
+                return p.current ? tr("%1 (current profile)").arg(p.name) : p.name;
+            }
+        }
+    }
+    return {};
+}
+
 void PokopiaDexDialog::FindSaves() {
     const QString root = QString::fromStdString(
         Common::FS::PathToUTF8String(Common::FS::GetEdenPath(Common::FS::EdenPath::SaveDir)));
+    const QSignalBlocker blocker(folders);
     QDirIterator it(root, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
     while (it.hasNext()) {
         const QString path = it.next();
         if (it.fileName().compare(QLatin1String(TitleFolder), Qt::CaseInsensitive) == 0 &&
             QFile::exists(CommonPath(path))) {
-            folders->addItem(QDir::toNativeSeparators(path), path);
+            const QString owner = OwnerOf(path);
+            const QString shown = QDir::toNativeSeparators(path);
+            folders->addItem(owner.isEmpty() ? shown : QStringLiteral("%1 — %2").arg(owner, shown),
+                             path);
         }
     }
     if (folders->count() == 0) {
         status->setText(tr("No Pokopia save found; use Browse to pick its folder (the one "
                            "holding G00)."));
         save_button->setEnabled(false);
+        return;
     }
+    // Ask once the dialog is up, not while it is being built.
+    QTimer::singleShot(0, this, &PokopiaDexDialog::PickStartingSave);
+}
+
+void PokopiaDexDialog::PickStartingSave() {
+    int pick = -1;
+    for (int i = 0; i < folders->count() && pick < 0; ++i) {
+        const QString user = QFileInfo(folders->itemData(i).toString()).dir().dirName();
+        for (const auto& p : profiles) {
+            if (p.current && p.keys.contains(user, Qt::CaseInsensitive)) {
+                pick = i;
+            }
+        }
+    }
+    if (pick < 0 && folders->count() > 1) {
+        QStringList choices;
+        for (int i = 0; i < folders->count(); ++i) {
+            choices << folders->itemText(i);
+        }
+        bool ok = false;
+        const QString chosen = QInputDialog::getItem(
+            this, windowTitle(),
+            tr("The current profile has no Pokopia save. Whose save do you want to edit?"),
+            choices, 0, false, &ok);
+        pick = ok ? std::max(0, static_cast<int>(choices.indexOf(chosen))) : 0;
+    }
+    pick = std::max(pick, 0);
+    {
+        const QSignalBlocker blocker(folders);
+        folders->setCurrentIndex(pick);
+    }
+    LoadSave(folders->itemData(pick).toString());
 }
 
 void PokopiaDexDialog::LoadSave(const QString& path) {
@@ -423,6 +507,10 @@ void PokopiaDexDialog::LoadSave(const QString& path) {
     }
     save_button->setEnabled(!game_running);
     Populate();
+    for (auto* tab : extra_tabs) {
+        tab->Load(data);
+    }
+    UpdateCount();
 }
 
 void PokopiaDexDialog::Populate() {
@@ -539,6 +627,10 @@ void PokopiaDexDialog::UpdateCount() {
     count(habitat_list, &built, &discovered, &habitat_changed);
     int recipes, recipe_half, recipe_changed;
     count(recipe_list, &recipes, &recipe_half, &recipe_changed);
+    int others = 0;
+    for (const auto* tab : extra_tabs) {
+        others += tab->Pending();
+    }
     status->setText(tr("Pokédex: %1 registered, %2 seen (of %3). Habitats: %4 built, %5 "
                        "discovered (of %6). Recipes: %8 of %9. Changes not saved yet: %7.")
                         .arg(registered)
@@ -547,7 +639,7 @@ void PokopiaDexDialog::UpdateCount() {
                         .arg(built)
                         .arg(discovered)
                         .arg(habitat_list->topLevelItemCount())
-                        .arg(dex_changed + habitat_changed + recipe_changed)
+                        .arg(dex_changed + habitat_changed + recipe_changed + others)
                         .arg(recipes)
                         .arg(recipe_list->topLevelItemCount()));
 }
@@ -674,6 +766,13 @@ void PokopiaDexDialog::Save() {
         }
     }
 
+    QStringList others;
+    for (const auto* tab : extra_tabs) {
+        if (const QString line = tab->Apply(edited); !line.isEmpty()) {
+            others << line;
+        }
+    }
+
     if (edited == data) {
         QMessageBox::information(this, windowTitle(), tr("Nothing to change."));
         return;
@@ -695,6 +794,9 @@ void PokopiaDexDialog::Save() {
     }
     if (linked > 0) {
         summary += tr("\n(%1 of those habitats come from the Pokémon you registered.)").arg(linked);
+    }
+    for (const auto& line : others) {
+        summary += QLatin1Char('\n') + line;
     }
     if (QMessageBox::question(this, windowTitle(),
                               tr("%1\n\nWrite this to the save? The save folder is backed up "

@@ -33,7 +33,7 @@ Everything here is for **Pokémon Pokopia 2.0.1** (build ID `76A489F3…`), only
 | Keyboard and mouse | Generic | A ready-made **Pokopia keyboard and mouse** input profile; a tool that turns the button prompts into keyboard and mouse glyphs (texture mod) |
 | Texture mods | — | Texture dumping and replacement (`EDEN_TEXTURE_DUMP`, `tools/texture_mods`) |
 | Minimap | — | The game's own map, **live on screen while you play**: you, Pokémon walking around, buildings and exits, north up |
-| Settings | — | A **Pikantine** page in Settings: minimap on or off, the Pokémon limit, the Pokédex and habitat editor |
+| Settings | — | A **Pikantine** page in Settings: minimap on or off, the Pokémon limit, the save editor |
 | Waypoints | — | A **ping** with an arrow and its distance at the top of the screen; set it with **G**, a click on the pause menu's map, **L3+R3**, or the **right stick and R3 on the pause map** |
 | Pokémon limit | The game's own (25 living, 30 in all) | **Up to 50** (default 30); raised a couple at a time once you are in play, so loading stays fast |
 | Builds | Every platform, on pushes to `main` | Every configured platform, on pushes to `main`; channel `pokecap-build-<n>` |
@@ -72,17 +72,22 @@ How it works:
 > [!WARNING]
 > Back up your save before raising the limit. Going back to a build without it may have the game send the extra Pokémon away.
 
-### Pokédex and habitat editor
+### Save editor
 
-Settings → Pikantine → **Open the Pokédex and habitat editor**, with the game stopped.
+Settings → Pikantine → **Open the save editor**, with the game stopped. It opens the current user profile's Pokopia save. If that profile has none, it asks whose save to edit. **Browse** still opens any save folder (the one holding `G00`).
 
 - **Pokédex tab:** all 374 entries by name, with each habitat it appears in, the areas that habitat works in for it, and whether it's rare there. Pick an area to list only what can appear on that island. Click a box to cycle it: empty (not yet), half (seen), ticked (registered).
 - **Habitats tab:** every habitat by name, with the Pokémon it draws and where: empty, half (discovered), ticked (built). The same area filter works here.
 - **Recipes tab:** all 921 recipes by the item they make; tick to learn. Recipes you already know stay as they are (the editor only adds).
+- **Moves tab:** learn moves (they go on the move wheel if there's room) and their upgrades: Dive, liquid absorption and the food boosts. Ticking an upgrade also ticks the move it needs.
+- **Reactions tab:** learn reactions; new ones fill empty slots on the reaction wheel.
+- **Bag tab:** set any of the 120 bag slots or the 10 bar slots to any item and count, or put an item in the first empty slot.
+- **Residents tab:** change a resident's friendship and whether its naming chat is done. **Add resident** (experimental, untested in game) writes a new resident with no home yet into the area you pick.
+- **Flags tab:** the game's 250 numbered feature flags. The game ships without their names, so only a few are known. The notes say what the game does with each one. You can label a flag yourself, and the label is kept between saves. Story flags can break your progress, so change one at a time.
 - **Unlock everything** registers every Pokémon, builds every habitat and learns every recipe. Registered Pokémon are also marked as seen in each of their habitats, which fills the "?" on habitat pages. Registering a Pokémon also marks its habitats discovered, unless you untick that option.
 - Dex rewards (the recipes at 6, 15, 20… registered) are left unclaimed, so the game hands them out itself.
 - The save folder is copied to `pikantine_backups` in Eglantine's folder before anything is written. Only Pokopia 2.0.1 saves are edited.
-- Names come from the game's own tables (see [docs/pokecap/save-layout.md](docs/pokecap/save-layout.md)). Where each Pokémon appears (habitat, areas, rarity) comes from the public databases dittobase.com and cliffchang11/Pokopia_Cliff; 22 special Pokémon (legendaries, Ditto, Kyogre, Volcanion, Phione, Manaphy and the 2.0 additions) have none listed.
+- Names come from the game's own tables (see [docs/pokecap/save-layout.md](docs/pokecap/save-layout.md)). The moves, reactions, bag, residents and flags layouts, and their names, are [PokoHex](https://github.com/berichan/PokoHex)'s (berichan, GPL-3.0). Where each Pokémon appears (habitat, areas, rarity) comes from the public databases dittobase.com and cliffchang11/Pokopia_Cliff; 22 special Pokémon (legendaries, Ditto, Kyogre, Volcanion, Phione, Manaphy and the 2.0 additions) have none listed.
 
 ### Mouse in menus and in play
 

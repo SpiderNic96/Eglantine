@@ -73,10 +73,35 @@ in the game's save code. Check any save with `tools/pikantine/dex_report.py` (re
   (cliffchang11/Pokopia_Cliff) lists two habitats per Pokémon; its 252 habitats match game ids
   through the zh-TW names (#4543).
 
+## Resident record
+
+From PokoHex, then compared across two real saves (42 and 139 residents):
+
+- 1050 records of 374 bytes from `0x0`, indexed by resident id. Bytes 1–16 are a 16-byte id that is
+  the same in every resident of a save. It is repeated at `0x22`, and its being set is what makes
+  a record a resident. `0x11` u16 friendship (170 per tier); `0x13` u16 thank points; `0x15` the
+  present level (1 in every record the game has touched); `0x16` waiting for a present;
+  `0x17` float −1.0; `0x1B` a u32 that differs per resident; `0xC2` 1; `0xC4` naming chat done;
+  `0xC5` 1; `0x16A` six u16, the date and time it arrived.
+- Some records have no id but a home area. Professor Tangrowth, Smearguru and Mosslax have one.
+- Homes: 21 bytes per resident from `0x79824`. Byte 0 is the home type (0 none, 1–3), `1` u16 home
+  id, `3` the area (stage) id, `6`/`8`/`10` i16 the last home block, `0x0E` float −1.0, `0x14` 1
+  when housed.
+- The editor's **Add resident** writes this shape with no home. It is untested in game.
+
+## Function flags
+
+- `m_functionFlag`: 32 bytes at `0x220F04`, flag n = bit n%8 of byte n/8, ids 1–249.
+- The game's name table for them, entry **#1221** (250 rows), ships blank: every row is empty
+  except row 0, "－－－". So the game knows the flags only by number.
+- Entry **#949** gives each flag a u32 of settings. The flag check at `main+0x113f10` reads them:
+  `0x10000` always on (flag 19), `0x20000` also on in game mode 17, `0x40000` read from the island
+  host's flags in multiplayer. Flags 160–249 have none and are set in no save checked.
+- Known from PokoHex: 54 liquid absorption, 56 Surf, 57 Glide, 71–74 the Leafage, Cut, Water Gun
+  and Rock Smash food boosts, 125 Rock Smash's extra food effect, 148 Dive, 153 Surf's food boost.
+
 ## Not in these fields
 
-- Which Pokémon live in town: the 1050 villager records at `0x0` (374 bytes each) and their homes
-  at `0x79824` (21 bytes each), both known from PokoHex. Each area's placed objects are in its
-  own `STGDATnn.BIN`.
+- Each area's placed objects are in its own `STGDATnn.BIN`.
 - The active-Pokémon budget (30 by default) is a game parameter, not save data:
   `[[main+0x36ca678]]+0xc`. Pikantine raises it while the game runs.

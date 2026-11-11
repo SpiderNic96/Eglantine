@@ -13,9 +13,46 @@
 #include <QSpinBox>
 #include <QVBoxLayout>
 
+#include <fmt/format.h>
+
 #include "common/settings.h"
+#include "common/string_util.h"
 #include "core/core.h"
+#include "core/hle/service/acc/profile_manager.h"
 #include "yuzu/configuration/pokopia_dex_dialog.h"
+
+namespace {
+
+/// The console's user profiles, with the folder names their saves can sit under.
+QVector<PokopiaProfile> Profiles(const Core::System& system) {
+    QVector<PokopiaProfile> out;
+    const auto& manager = system.GetProfileManager();
+    const auto current = manager.GetUser(Settings::values.current_user.GetValue());
+    for (std::size_t index = 0; index < Service::Account::MAX_USERS; ++index) {
+        const auto user = manager.GetUser(index);
+        if (!user.has_value()) {
+            continue;
+        }
+        const Common::UUID uuid = *user;
+        Service::Account::ProfileBase base{};
+        PokopiaProfile p;
+        if (manager.GetProfileBase(uuid, base)) {
+            p.name = QString::fromStdString(Common::StringFromFixedZeroTerminatedBuffer(
+                reinterpret_cast<const char*>(base.username.data()), base.username.size()));
+        }
+        const auto id = uuid.AsU128();
+        p.keys << QString::fromStdString(fmt::format("{:016X}{:016X}", id[1], id[0]))
+               << QString::fromStdString(uuid.RawString());
+        if (p.name.isEmpty()) {
+            p.name = p.keys.front();
+        }
+        p.current = current.has_value() && *current == uuid;
+        out.push_back(p);
+    }
+    return out;
+}
+
+} // namespace
 
 ConfigurePikantine::ConfigurePikantine(const Core::System& system_, QWidget* parent)
     : QWidget(parent), system{system_} {
@@ -59,18 +96,18 @@ ConfigurePikantine::ConfigurePikantine(const Core::System& system_, QWidget* par
     }
     layout->addWidget(cap_box);
 
-    auto* dex_box = new QGroupBox(tr("Pokédex and habitats"), this);
+    auto* dex_box = new QGroupBox(tr("Save editor"), this);
     auto* dex_layout = new QVBoxLayout(dex_box);
     auto* dex_note = new QLabel(
-        tr("Register or mark as seen any of the 374 Pokédex entries, and discover or build any "
-           "habitat, by name; each Pokémon shows the habitats it appears in. Edits your 2.0.1 "
-           "save while the game is stopped, and backs it up first."),
+        tr("Pokédex, habitats and recipes; moves, reactions, the bag, residents and the game's "
+           "feature flags. Opens your current profile's 2.0.1 save (or asks whose), edits it while "
+           "the game is stopped, and backs it up first."),
         dex_box);
     dex_note->setWordWrap(true);
-    auto* dex_button = new QPushButton(tr("Open the Pokédex and habitat editor…"), dex_box);
+    auto* dex_button = new QPushButton(tr("Open the save editor…"), dex_box);
     dex_button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
     connect(dex_button, &QPushButton::clicked, this, [this] {
-        PokopiaDexDialog dialog(system.IsPoweredOn(), this);
+        PokopiaDexDialog dialog(system.IsPoweredOn(), Profiles(system), this);
         dialog.exec();
     });
     dex_layout->addWidget(dex_note);
