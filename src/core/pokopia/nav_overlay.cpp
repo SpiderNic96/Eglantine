@@ -1382,7 +1382,9 @@ void InstallNavOverlay(Core::System& system, HookInstaller& hooks, u64 main_base
         g_tick_event = Core::Timing::CreateEvent(
             "Pokopia navigation overlay",
             [](s64, std::chrono::nanoseconds) -> std::optional<std::chrono::nanoseconds> {
-                if (g_system != nullptr) {
+                // Only while the game runs: once its process has ended (it closed or crashed),
+                // its memory is gone and reading it would take the emulator down too.
+                if (g_system != nullptr && g_system->ApplicationProcess() != nullptr) {
                     Tick();
                 }
                 return std::nullopt;

@@ -575,7 +575,9 @@ void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base
         g_event = Core::Timing::CreateEvent(
             "Pokopia Pokémon limit",
             [](s64, std::chrono::nanoseconds) -> std::optional<std::chrono::nanoseconds> {
-                if (g_system != nullptr) {
+                // Only while the game runs: once its process has ended (it closed or crashed),
+                // its memory is gone and reading it would take the emulator down too.
+                if (g_system != nullptr && g_system->ApplicationProcess() != nullptr) {
                     Apply();
                 }
                 return std::nullopt;
