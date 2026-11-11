@@ -65,6 +65,7 @@ The limit of Pokémon living in your world is a game setting; this build raises 
 How it works:
 - The limit is per area: the game places an area's Pokémon while it loads (each area starts from an empty pool of 64), so higher numbers make entering an area slower; around 30 stays quick.
 - The limit is never lowered while you play (lowering it had the game send Pokémon away until a restart).
+- The game also keeps only 30 Pokémon *active* (drawn and moving) at once, nearest first; above 30 it sent the farthest out, and the ones out when you left an area stayed invisible on your next visit (Honey then found them "already here"). This build raises that number with the limit, so every placed Pokémon stays active. The log shows it: `Pokopia Pokémon limit: N active at once`.
 - The log shows how full the pool is: `Pokopia Pokémon slots: N of 64 in use`.
 - The game's pool holds 64 Pokémon, visitors included, so 50 is the most this allows.
 

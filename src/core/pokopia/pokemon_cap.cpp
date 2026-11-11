@@ -34,6 +34,15 @@ constexpr u64 ObjectLimit = 0x4c0;  // all Pokémon objects, the spawner's hard 
 constexpr u32 MaxCap = 50;          // the object pool has 64 slots; leave room for visitors
 constexpr u32 MaxObjects = 56;
 
+// How many Pokémon the game keeps active (drawn and moving) at once: u32 at +0xc of the block at
+// [holder+0] (the holder above: [main+0x36ca678]). 30 by default. Its keeper (main+0x288e80) ranks
+// the placed Pokémon nearest first and asks the first 30 to come in (actor+0x2428 |= 1) and the
+// rest to go out (|= 2): with more than 30 placed, the farthest were sent out, and the ones out
+// when the player left an area stayed out on the next visit (invisible, though placed: Honey then
+// finds them "already here"). Raised with the limit, every placed Pokémon stays active.
+constexpr u64 ActiveField = 0x0;
+constexpr u64 ActiveBudget = 0xc;
+
 // The world's residents list (main+0x3561928): +0x2a0 data, +0x2ac count. Empty while loading.
 constexpr u64 ResidentsGlobal = 0x3561928;
 constexpr u64 ResidentsData = 0x2a0, ResidentsCount = 0x2ac;
@@ -81,6 +90,11 @@ struct Seen {
     u32 objects{};
 };
 Seen g_seen;
+struct SeenActive {
+    u64 block{};
+    u32 budget{};
+};
+SeenActive g_active;
 u32 g_play_ticks{}; // ticks in play since the residents came back
 bool g_loaded{};
 u32 g_logged_free = ~0u;
@@ -167,9 +181,11 @@ void Census(Core::Memory::Memory& memory, u64 pool, u32 placed) {
             z = std::bit_cast<float>(memory.Read32(pos + 8));
         }
         LOG_INFO(Loader,
-                 "  slot {:2} resident {:4} kind {:#05x} state {:#06x} flags {:08x} at {:.0f} {:.0f} {:.0f}",
+                 "  slot {:2} resident {:4} kind {:#05x} state {:#06x} flags {:08x} lod {:02x} {:02x} "
+                 "{:02x} at {:.0f} {:.0f} {:.0f}",
                  i, row, memory.Read16(obj + ObjKind), memory.Read16(obj + ObjState),
-                 memory.Read32(obj + ObjFlags), x, y, z);
+                 memory.Read32(obj + ObjFlags), memory.Read8(obj + 0x2428),
+                 memory.Read8(obj + 0x2430), memory.Read8(obj + 0x2431), x, y, z);
         if (dump) {
             LOG_INFO(Loader, "  layout resident {:4}: {}", row, NonZeroWords(memory, obj));
         }
@@ -302,6 +318,16 @@ void Write(Core::Memory::Memory& memory, u64 params, u32 living) {
     }
 }
 
+void WriteActive(Core::Memory::Memory& memory, u32 budget) {
+    if (g_active.block == 0 || budget == 0 || !Valid(memory, g_active.block + ActiveBudget, 4)) {
+        return;
+    }
+    if (memory.Read32(g_active.block + ActiveBudget) != budget) {
+        memory.Write32(g_active.block + ActiveBudget, budget);
+        LOG_INFO(Loader, "Pokopia Pokémon limit: {} active at once", budget);
+    }
+}
+
 void Apply() {
     auto& memory = g_system->ApplicationMemory();
     const u64 global = g_main_base + ParamsGlobal;
@@ -316,6 +342,7 @@ void Apply() {
     if (!Valid(memory, params + LivingLimit, 8)) {
         return;
     }
+    const u64 active_block = memory.Read64(holder + ActiveField);
     const long wanted = g_env_cap >= 0 ? g_env_cap : Settings::values.pokopia_pokemon_cap.GetValue();
     const u32 cap = static_cast<u32>(std::clamp<long>(wanted, 0, MaxCap));
     if (cap != g_cap) {
@@ -335,13 +362,23 @@ void Apply() {
         LOG_INFO(Loader, "Pokopia Pokémon limit: the game allows {} living ({} objects); up to {}",
                  living, objects, g_cap);
     }
+    if (active_block != g_active.block && Valid(memory, active_block + ActiveBudget, 4)) {
+        const u32 budget = memory.Read32(active_block + ActiveBudget);
+        if (budget >= 1 && budget <= 64) { // sanity: anything else is not the field we know
+            g_active = {active_block, budget};
+            LOG_INFO(Loader, "Pokopia Pokémon limit: the game keeps {} active at once", budget);
+        }
+    }
     if (g_cap == 0) {
         g_fill_cap = ~0u;
         Write(memory, params, g_seen.living); // the game's own limit
+        WriteActive(memory, g_active.budget);
         return;
     }
     const u32 target = std::max(g_cap, g_seen.living);
     Write(memory, params, target); // never lowered: that sends Pokémon away
+    // Every Pokémon that can be placed stays active (the hard limit), never fewer than the game's.
+    WriteActive(memory, std::max(g_active.budget, memory.Read32(params + ObjectLimit)));
     const u32 free = PoolFreeSlots(memory);
     if (!g_staged) {
         g_fill_cap = ~0u;
@@ -398,6 +435,7 @@ void InstallPokemonCap(Core::System& system, HookInstaller* hooks, u64 main_base
         timing.UnscheduleEvent(g_event);
     }
     g_seen = {};
+    g_active = {};
     g_play_ticks = 0;
     g_loaded = false;
     g_fill_owner = 0;
