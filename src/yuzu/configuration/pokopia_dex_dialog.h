@@ -35,11 +35,14 @@ private:
     void Populate();
     void UpdateCount();
     void Save();
+    void Refilter();
 
     QComboBox* folders{};
     QLabel* status{};
     QLineEdit* dex_search{};
     QLineEdit* habitat_search{};
+    QComboBox* dex_area{};
+    QComboBox* habitat_area{};
     QTreeWidget* dex_list{};
     QTreeWidget* habitat_list{};
     QCheckBox* link_habitats{};

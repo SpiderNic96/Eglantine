@@ -74,9 +74,38 @@ QString HabitatName(int id) {
     return QObject::tr("Habitat #%1").arg(id);
 }
 
-void Filter(QTreeWidget* list, const QString& text) {
+constexpr int AreasRole = Qt::UserRole + 2;
+constexpr u8 MainAreas = 0x3f; // every area but Bubbly Basin
+
+QString AreaText(u8 areas) {
+    if ((areas & MainAreas) == MainAreas) {
+        return QObject::tr("all areas");
+    }
+    QStringList names;
+    for (int i = 0; i < static_cast<int>(Pikantine::PokopiaAreaNames.size()); ++i) {
+        if (areas & (1 << i)) {
+            names << QString::fromUtf8(Pikantine::PokopiaAreaNames[i]);
+        }
+    }
+    return names.join(QStringLiteral(", "));
+}
+
+QString SpawnText(const Pikantine::Spawn& s, const QString& what) {
+    QString text = QStringLiteral("%1 (%2").arg(what, AreaText(s.areas));
+    if (s.rare) {
+        text += QObject::tr(", rare");
+    }
+    return text + QLatin1Char(')');
+}
+
+/// Shows the rows matching the text and, when `area` is not 0, able to appear in that area.
+void Filter(QTreeWidget* list, const QString& text, int area = 0) {
     for (int i = 0; i < list->topLevelItemCount(); ++i) {
         auto* item = list->topLevelItem(i);
+        if (area != 0 && (item->data(0, AreasRole).toInt() & area) == 0) {
+            item->setHidden(true);
+            continue;
+        }
         bool match = text.isEmpty();
         for (int c = 0; !match && c < list->columnCount(); ++c) {
             match = item->text(c).contains(text, Qt::CaseInsensitive);
@@ -164,7 +193,7 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
     auto* layout = new QVBoxLayout(this);
 
     auto* note = new QLabel(
-        tr("Click a box to cycle it: empty = not yet, <b>half</b> = seen (Pokédex) or discovered "
+        tr("Filter by area to see what can appear on each island. Click a box to cycle it: empty = not yet, <b>half</b> = seen (Pokédex) or discovered "
            "(habitat), <b>ticked</b> = registered or built. Changes show "
            "<span style='color:#2e7d32'>green</span>; nothing is written until <b>Save</b>, and "
            "your save folder is backed up first. Dex rewards (recipes) are left for the game to "
@@ -190,8 +219,16 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
     dex_search = new QLineEdit(dex_page);
     dex_search->setPlaceholderText(tr("Search Pokémon or habitat"));
     dex_search->setClearButtonEnabled(true);
-    dex_list = MakeList(dex_page, {tr("Pokémon"), tr("Slot"), tr("Appears in (habitats)")});
-    dex_layout->addWidget(dex_search);
+    dex_area = new QComboBox(dex_page);
+    dex_area->addItem(tr("Any area"), 0);
+    for (int i = 0; i < static_cast<int>(Pikantine::PokopiaAreaNames.size()); ++i) {
+        dex_area->addItem(QString::fromUtf8(Pikantine::PokopiaAreaNames[i]), 1 << i);
+    }
+    dex_list = MakeList(dex_page, {tr("Pokémon"), tr("Slot"), tr("Appears in (habitat, areas)")});
+    auto* dex_filters = new QHBoxLayout();
+    dex_filters->addWidget(dex_search, 1);
+    dex_filters->addWidget(dex_area);
+    dex_layout->addLayout(dex_filters);
     dex_layout->addWidget(dex_list, 1);
     tabs->addTab(dex_page, tr("Pokédex"));
 
@@ -200,8 +237,15 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
     habitat_search = new QLineEdit(habitat_page);
     habitat_search->setPlaceholderText(tr("Search habitat or Pokémon"));
     habitat_search->setClearButtonEnabled(true);
-    habitat_list = MakeList(habitat_page, {tr("Habitat"), tr("Id"), tr("Draws (Pokémon)")});
-    habitat_layout->addWidget(habitat_search);
+    habitat_area = new QComboBox(habitat_page);
+    for (int i = 0; i < dex_area->count(); ++i) {
+        habitat_area->addItem(dex_area->itemText(i), dex_area->itemData(i));
+    }
+    habitat_list = MakeList(habitat_page, {tr("Habitat"), tr("Id"), tr("Draws (Pokémon, areas)")});
+    auto* habitat_filters = new QHBoxLayout();
+    habitat_filters->addWidget(habitat_search, 1);
+    habitat_filters->addWidget(habitat_area);
+    habitat_layout->addLayout(habitat_filters);
     habitat_layout->addWidget(habitat_list, 1);
     tabs->addTab(habitat_page, tr("Habitats"));
     layout->addWidget(tabs, 1);
@@ -245,10 +289,10 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
             LoadSave(folders->itemData(index).toString());
         }
     });
-    connect(dex_search, &QLineEdit::textChanged, this,
-            [this](const QString& text) { Filter(dex_list, text); });
-    connect(habitat_search, &QLineEdit::textChanged, this,
-            [this](const QString& text) { Filter(habitat_list, text); });
+    connect(dex_search, &QLineEdit::textChanged, this, &PokopiaDexDialog::Refilter);
+    connect(habitat_search, &QLineEdit::textChanged, this, &PokopiaDexDialog::Refilter);
+    connect(dex_area, &QComboBox::currentIndexChanged, this, &PokopiaDexDialog::Refilter);
+    connect(habitat_area, &QComboBox::currentIndexChanged, this, &PokopiaDexDialog::Refilter);
     const auto changed = [this](QTreeWidgetItem* item, int column) {
         if (populating || column != 0) {
             return;
@@ -285,6 +329,11 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
 }
 
 PokopiaDexDialog::~PokopiaDexDialog() = default;
+
+void PokopiaDexDialog::Refilter() {
+    Filter(dex_list, dex_search->text(), dex_area->currentData().toInt());
+    Filter(habitat_list, habitat_search->text(), habitat_area->currentData().toInt());
+}
 
 void PokopiaDexDialog::FindSaves() {
     const QString root = QString::fromStdString(
@@ -344,22 +393,29 @@ void PokopiaDexDialog::Populate() {
     habitat_list->clear();
 
     QHash<int, QStringList> draws; // habitat id -> Pokémon that appear in it
+    QHash<int, int> habitat_areas; // habitat id -> areas any of them appear in
     QSet<int> named_slots;
     for (const auto& p : Pikantine::PokopiaDexSlots) {
         named_slots.insert(p.slot);
         QStringList where;
-        for (const u16 h : p.habitats) {
-            if (h != 0) {
-                where << HabitatName(h);
-                draws[h] << QString::fromUtf8(p.name);
+        int areas = 0;
+        for (const auto& spawn : p.spawns) {
+            if (spawn.habitat == 0) {
+                continue;
             }
+            where << SpawnText(spawn, HabitatName(spawn.habitat));
+            draws[spawn.habitat] << SpawnText(spawn, QString::fromUtf8(p.name));
+            habitat_areas[spawn.habitat] |= spawn.areas;
+            areas |= spawn.areas;
         }
         auto* item = new QTreeWidgetItem(dex_list);
         item->setText(0, QString::fromUtf8(p.name));
         item->setText(1, QString::number(p.slot));
-        item->setText(2, where.isEmpty() ? tr("(special: story, event or not mapped)")
-                                         : where.join(QStringLiteral(", ")));
+        item->setText(2, where.isEmpty() ? tr("(special: story, event or not listed yet)")
+                                         : where.join(QStringLiteral("; ")));
+        item->setToolTip(2, item->text(2));
         item->setData(0, IdRole, p.slot);
+        item->setData(0, AreasRole, areas);
     }
     // Slots the save uses that the table does not name still show, by number.
     for (int slot = 1; slot < DexCount; ++slot) {
@@ -377,8 +433,10 @@ void PokopiaDexDialog::Populate() {
         auto* item = new QTreeWidgetItem(habitat_list);
         item->setText(0, QString::fromUtf8(h.name));
         item->setText(1, QString::number(h.id));
-        item->setText(2, draws.value(h.id).join(QStringLiteral(", ")));
+        item->setText(2, draws.value(h.id).join(QStringLiteral("; ")));
+        item->setToolTip(2, item->text(2));
         item->setData(0, IdRole, static_cast<int>(h.id));
+        item->setData(0, AreasRole, habitat_areas.value(h.id));
     }
     for (int id = 1; id < HabitatCount; ++id) {
         if (habitat_state.value(id) != 0 && !named_habitats.contains(id)) {
@@ -400,8 +458,7 @@ void PokopiaDexDialog::Populate() {
         }
     }
     populating = false;
-    Filter(dex_list, dex_search->text());
-    Filter(habitat_list, habitat_search->text());
+    Refilter();
     UpdateCount();
 }
 
@@ -457,7 +514,8 @@ void PokopiaDexDialog::Save() {
                 if (p.slot != slot) {
                     continue;
                 }
-                for (const u16 h : p.habitats) {
+                for (const auto& spawn : p.spawns) {
+                    const int h = spawn.habitat;
                     if (h != 0 && habitats.value(h) == 0) {
                         habitats[h] = 1;
                         ++linked;
