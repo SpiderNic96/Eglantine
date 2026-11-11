@@ -114,6 +114,16 @@ void Filter(QTreeWidget* list, const QString& text, int area = 0) {
     }
 }
 
+template <std::size_t N>
+bool Contains(const std::array<u16, N>& ids, int id) {
+    return std::find(ids.begin(), ids.end(), id) != ids.end();
+}
+
+bool Unreleased(bool dex, int id) {
+    return dex ? Contains(Pikantine::PokopiaUnreleasedSlots, id)
+               : Contains(Pikantine::PokopiaUnreleasedHabitats, id);
+}
+
 QTreeWidget* MakeList(QWidget* parent, const QStringList& headers) {
     auto* list = new QTreeWidget(parent);
     list->setHeaderLabels(headers);
@@ -309,15 +319,19 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
     connect(unlock_all, &QPushButton::clicked, this, [this] {
         for (auto* list : {dex_list, habitat_list}) {
             for (int i = 0; i < list->topLevelItemCount(); ++i) {
-                list->topLevelItem(i)->setCheckState(0, Qt::Checked);
+                auto* item = list->topLevelItem(i);
+                if (item->flags() & Qt::ItemIsUserCheckable) {
+                    item->setCheckState(0, Qt::Checked);
+                }
             }
         }
     });
     connect(tick_shown, &QPushButton::clicked, this, [this, tabs] {
         auto* list = tabs->currentIndex() == 0 ? dex_list : habitat_list;
         for (int i = 0; i < list->topLevelItemCount(); ++i) {
-            if (!list->topLevelItem(i)->isHidden()) {
-                list->topLevelItem(i)->setCheckState(0, Qt::Checked);
+            auto* item = list->topLevelItem(i);
+            if (!item->isHidden() && (item->flags() & Qt::ItemIsUserCheckable)) {
+                item->setCheckState(0, Qt::Checked);
             }
         }
     });
@@ -382,6 +396,21 @@ void PokopiaDexDialog::LoadSave(const QString& path) {
     }
     save_button->setEnabled(!game_running);
     Populate();
+    int stale = 0;
+    for (const u16 slot : Pikantine::PokopiaUnreleasedSlots) {
+        stale += dex_state.value(slot) != 0 ? 1 : 0;
+    }
+    for (const u16 id : Pikantine::PokopiaUnreleasedHabitats) {
+        stale += habitat_state.value(id) != 0 ? 1 : 0;
+    }
+    if (stale > 0) {
+        status->setText(status->text() +
+                        tr("<br><b>%1 entries not in the game yet are set</b> (an earlier \"Unlock "
+                           "everything\" did this, and the game will not load the save). Press "
+                           "Save to clear them.")
+                            .arg(stale));
+        status->setTextFormat(Qt::RichText);
+    }
 }
 
 void PokopiaDexDialog::Populate() {
@@ -448,12 +477,23 @@ void PokopiaDexDialog::Populate() {
     }
 
     for (auto* list : {dex_list, habitat_list}) {
-        const auto& states = list == dex_list ? dex_state : habitat_state;
+        const bool dex = list == dex_list;
+        const auto& states = dex ? dex_state : habitat_state;
         for (int i = 0; i < list->topLevelItemCount(); ++i) {
             auto* item = list->topLevelItem(i);
-            const int state = states.value(item->data(0, IdRole).toInt());
-            item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsUserTristate);
+            const int id = item->data(0, IdRole).toInt();
+            const int state = states.value(id);
             item->setData(0, StateRole, state);
+            if (Unreleased(dex, id)) {
+                // Kept at "not yet": Save clears them if an earlier build set them.
+                item->setText(0, tr("%1 (not in the game yet)").arg(item->text(0)));
+                item->setToolTip(0, tr("In the game data but not released; a save with this set "
+                                       "does not load. Left empty."));
+                item->setFlags(item->flags() & ~(Qt::ItemIsUserCheckable | Qt::ItemIsEnabled));
+                item->setCheckState(0, Qt::Unchecked);
+                continue;
+            }
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsUserTristate);
             item->setCheckState(0, CheckOf(state));
         }
     }
@@ -516,7 +556,7 @@ void PokopiaDexDialog::Save() {
                 }
                 for (const auto& spawn : p.spawns) {
                     const int h = spawn.habitat;
-                    if (h != 0 && habitats.value(h) == 0) {
+                    if (h != 0 && habitats.value(h) == 0 && !Unreleased(false, h)) {
                         habitats[h] = 1;
                         ++linked;
                     }

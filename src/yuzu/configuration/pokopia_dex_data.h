@@ -685,4 +685,10 @@ inline constexpr std::array<Habitat, 257> PokopiaHabitats{{
     {317, "Apple kitchen"},
 }};
 
+/// In the 2.0.1 data but not in the game yet (Pumpkaboo, Gourgeist, the Applin line and their
+/// habitats): no public database lists them, and a save with them set fails to load (black
+/// screen, then the game closes). The editor never sets them and clears them on save.
+inline constexpr std::array<u16, 7> PokopiaUnreleasedSlots{354, 355, 356, 357, 358, 359, 360};
+inline constexpr std::array<u16, 5> PokopiaUnreleasedHabitats{313, 314, 315, 316, 317};
+
 } // namespace Pikantine
