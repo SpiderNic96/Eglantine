@@ -32,6 +32,18 @@ built and discovered, and the dex rewards claimed. The layout behind it is in
 
     python dex_report.py "%APPDATA%\eglantine\nand\user\save\...\G00\CMNDAT.BIN"
 
+## dex_tables.py
+
+Names every Pokédex slot and habitat id from your own RomFS dump, read straight from the game's
+tables (entries #1066, #4934, #4538). Writes `pikantine_dex_tables.json` next to itself. Give it
+saves too and it lists, by name, what each one has registered, seen, built and discovered. No
+packages needed; takes a second.
+
+    python dex_tables.py "C:\path\to\romfs" "%APPDATA%\eglantine\nand\user\save\...\G00\CMNDAT.BIN"
+
+The three `find_*` scripts below were the search that located those tables; they are kept for
+other game builds.
+
 ## find_dex_table.py
 
 Read-only: searches a RomFS dump for the table that says which Pokémon each Pokédex slot is (the

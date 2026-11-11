@@ -7,7 +7,7 @@ another; the order is anchored by PokoHex's known offsets (item catalogue 0x402E
     python dex_report.py path/to/CMNDAT.BIN [more saves...]
 
 Nothing is written. Index = the game's internal Pokédex slot (the in-game "Numerical order" follows it,
-but it is NOT the printed Pokédex number; the slot -> species table is still to be read from the game data).
+but it is NOT the printed Pokédex number). dex_tables.py names the slots and habitats from a RomFS dump.
 """
 import struct
 import sys
@@ -22,7 +22,7 @@ FIELDS = {
     "recipeHistory": (0x3FCB4C, 0x2328, "byte per recipe"),
     "itemHistory": (0x402ED9, 0x11F8, "byte per item (bit 0: obtained)"),
     "pokemonHistory": (0x4052FF, 0x20400, "per-Pokémon history (layout unknown)"),
-    "habitatHistory": (0x4256FF, 0x1800, "u32 per habitat: 1 discovered, 3 built"),
+    "habitatHistory": (0x4256FF, 0x1800, "12 bytes per habitat id: u32 state (1 discovered, 3 built), 2 x u32"),
     "pokemonDexHistory": (0x426EFF, 0x400, "byte per dex slot: bits 0+1 registered, bit 3 seen, bit 2 ?"),
     "pokemonDexReadHistory": (0x4272FF, 0x400, "byte per dex slot: entry opened (not 'new')"),
     "pokeDexLvFinishHistory": (0x4276FF, 0x65, "byte per dex reward level claimed"),
@@ -46,12 +46,12 @@ def report(path):
     hab = raw[0x4256FF:0x4256FF + 0x1800]
     registered = [i for i, v in enumerate(dex) if v & 3 == 3]
     seen = [i for i, v in enumerate(dex) if v & 8 and v & 3 != 3]
-    habitats = [struct.unpack_from("<I", hab, i * 4)[0] for i in range(0x600)]
+    habitats = [struct.unpack_from("<I", hab, i * 12)[0] for i in range(0x1800 // 12)]
     print(f"== {path}")
     print(f"  Pokédex: {len(registered)} registered, {len(seen)} seen only")
     print(f"    registered slots: {registered}")
-    print(f"  Habitat Dex: {sum(1 for v in habitats if v & 2)} built, "
-          f"{sum(1 for v in habitats if v == 1)} discovered only")
+    print(f"  Habitat Dex: {sum(1 for v in habitats if v == 3)} built, "
+          f"{sum(1 for v in habitats if v and v != 3)} discovered only")
     print(f"  Dex rewards claimed: {sum(1 for v in raw[0x4276FF:0x4276FF + 0x65] if v)}")
 
 
