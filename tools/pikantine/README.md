@@ -23,3 +23,11 @@ python scan_game_files.py "<folder with the dumped game>"
 Looks through every file (and the zlib streams inside them) for a table listing Bulbasaur,
 Charmander, Charizard, Squirtle, …, Pidgey, Oddish in the in-game Pokédex's order. `LIKELY`
 lines in `scan_report.txt` are the ones to send back.
+
+## dex_report.py
+
+Read-only: prints how many Pokémon a `CMNDAT.BIN` has registered and seen, how many habitats are
+built and discovered, and the dex rewards claimed. The layout behind it is in
+[docs/pokecap/save-layout.md](../../docs/pokecap/save-layout.md).
+
+    python dex_report.py "%APPDATA%\eglantine\nand\user\save\...\G00\CMNDAT.BIN"
