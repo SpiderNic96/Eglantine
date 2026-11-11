@@ -78,8 +78,7 @@ Settings → Pikantine → **Open the Pokédex and habitat editor**, with the ga
 
 - **Pokédex tab:** all 374 entries by name, with each habitat it appears in, the areas that habitat works in for it, and whether it's rare there. Pick an area to list only what can appear on that island. Click a box to cycle it: empty (not yet), half (seen), ticked (registered).
 - **Habitats tab:** every habitat by name, with the Pokémon it draws and where: empty, half (discovered), ticked (built). The same area filter works here.
-- **Unlock everything** registers every Pokémon and builds every habitat the game has released. Registering a Pokémon also marks its habitats discovered, unless you untick that option.
-- Pumpkaboo, Gourgeist, the Applin line and their 5 habitats are in the 2.0.1 data but not in the game yet. They show greyed out and are never set, because a save with them set does not load (black screen, then the game closes). If an earlier build's Unlock everything set them, open the editor and press Save to clear them.
+- **Unlock everything** registers every Pokémon and builds every habitat. Registering a Pokémon also marks its habitats discovered, unless you untick that option.
 - Dex rewards (the recipes at 6, 15, 20… registered) are left unclaimed, so the game hands them out itself.
 - The save folder is copied to `pikantine_backups` in Eglantine's folder before anything is written. Only Pokopia 2.0.1 saves are edited.
 - Names come from the game's own tables (see [docs/pokecap/save-layout.md](docs/pokecap/save-layout.md)). Where each Pokémon appears (habitat, areas, rarity) comes from the public databases dittobase.com and cliffchang11/Pokopia_Cliff; 22 special Pokémon (legendaries, Ditto, Kyogre, Volcanion, Phione, Manaphy and the 2.0 additions) have none listed.
