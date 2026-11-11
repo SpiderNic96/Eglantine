@@ -70,6 +70,9 @@ def container_entries(idx_path, bin_path):
 
 
 
+DIVERSE = sorted({r for t in TOWNS.values() for r in t["villagers"] if r >= MIN_ID})
+
+
 def setup():
     towns = []
     for t in TOWNS.values():
@@ -117,9 +120,13 @@ def search(blob, order, top):
                     break
         if cand is None:
             cand = np.nonzero(mask)[0]
-        for c in cand[:8]:
+        for c in cand[:64]:
             p0 = int(c) + lo - pad
-            hits.append((s, p0))
+            # the real table gives (nearly) every resident its own slot: constant or repeating
+            # fields pass the registered check too, so ask for at least 85% distinct values
+            vals = [int(v[c + lo + r * s]) for r in DIVERSE]
+            if len(set(vals)) >= 0.85 * len(vals):
+                hits.append((s, p0, len(set(vals))))
     return hits
 
 
@@ -150,10 +157,12 @@ def main():
         for n, blob in container_entries(idx_path, bin_path):
             if n % 250 == 0:
                 print(f"  entry {n} ({time.time() - t0:.0f} s, {len(found)} found)", flush=True)
-            for s, p0 in search(blob, order, top):
+            for s, p0, distinct in search(blob, order, top):
                 found.append({"source": f"container entry {n}", "size": len(blob), "row_size": s,
-                              "row0_field_at": p0, "slot_of_resident": table(blob, s, p0)})
-                print(f"  FOUND: entry {n}, row {s} B, field of row 0 at {p0}", flush=True)
+                              "row0_field_at": p0, "distinct": distinct,
+                              "slot_of_resident": table(blob, s, p0)})
+                print(f"  FOUND: entry {n}, row {s} B, field of row 0 at {p0} "
+                      f"({distinct} of {len(DIVERSE)} residents on different slots)", flush=True)
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pikantine_resident_table.json")
     json.dump(found, open(out, "w"), indent=1)
     print(f"\n{len(found)} candidate(s); written to {out}")
