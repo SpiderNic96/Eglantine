@@ -43,6 +43,12 @@ constexpr int DexOffset = 0x426EFF;      // m_pokemonDexHistory: a byte per Pok�
 constexpr int DexCount = 0x400;
 constexpr int HabitatOffset = 0x4256FF;  // m_habitatHistory: 12 bytes per habitat id
 constexpr int HabitatCount = 0x1800 / 12;
+// m_pokemonHistory: a record per species row (#1066), 129 bytes: the habitats it has been seen in
+// (512 bits), the same again, then a flag byte. A habitat page shows "?" for a Pokémon whose
+// record lacks that habitat.
+constexpr int HistoryOffset = 0x4052FF;
+constexpr int HistoryRecord = 129;
+constexpr int HistoryCount = 0x20400 / HistoryRecord;
 constexpr quint8 Registered = 0x03;      // bits 0 and 1
 constexpr quint8 Seen = 0x08;            // bit 3: seen only, a silhouette
 constexpr int IdRole = Qt::UserRole;
@@ -254,6 +260,12 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
         tr("When a Pokémon gets registered, also mark its habitats discovered"), this);
     link_habitats->setChecked(true);
     layout->addWidget(link_habitats);
+    fill_sightings = new QCheckBox(
+        tr("Mark each registered Pokémon as seen in all its habitats (fills the \"?\" on habitat "
+           "pages)"),
+        this);
+    fill_sightings->setChecked(true);
+    layout->addWidget(fill_sightings);
 
     auto* actions = new QHBoxLayout();
     auto* unlock_all = new QPushButton(tr("Unlock everything"), this);
@@ -539,6 +551,37 @@ void PokopiaDexDialog::Save() {
         }
     }
 
+    // Sightings: every Pokémon registered after this save, seen in each habitat it appears in.
+    int sighted = 0;
+    if (fill_sightings->isChecked()) {
+        QHash<int, int> wanted; // slot -> wanted state
+        for (int i = 0; i < dex_list->topLevelItemCount(); ++i) {
+            const auto* item = dex_list->topLevelItem(i);
+            wanted[item->data(0, IdRole).toInt()] = StateOf(item);
+        }
+        for (const auto& p : Pikantine::PokopiaDexSlots) {
+            if (wanted.value(p.slot) != 2 || p.row >= HistoryCount) {
+                continue;
+            }
+            char* record = edited.data() + HistoryOffset + p.row * HistoryRecord;
+            bool any = false;
+            for (const auto& spawn : p.spawns) {
+                if (spawn.habitat == 0 || spawn.habitat >= 512) {
+                    continue;
+                }
+                const int byte = spawn.habitat / 8;
+                const char bit = static_cast<char>(1 << (spawn.habitat % 8));
+                for (const int copy : {0, 64}) {
+                    if ((record[copy + byte] & bit) == 0) {
+                        record[copy + byte] = static_cast<char>(record[copy + byte] | bit);
+                        any = true;
+                    }
+                }
+            }
+            sighted += any ? 1 : 0;
+        }
+    }
+
     int built = 0, discovered = 0, removed = 0;
     for (auto it = habitats.cbegin(); it != habitats.cend(); ++it) {
         const int id = it.key();
@@ -570,6 +613,10 @@ void PokopiaDexDialog::Save() {
                           .arg(built)
                           .arg(discovered)
                           .arg(removed);
+    if (sighted > 0) {
+        summary += tr("\nSightings: %1 Pokémon marked as seen in more of their habitats.")
+                       .arg(sighted);
+    }
     if (linked > 0) {
         summary += tr("\n(%1 of those habitats come from the Pokémon you registered.)").arg(linked);
     }

@@ -46,6 +46,7 @@ private:
     QTreeWidget* dex_list{};
     QTreeWidget* habitat_list{};
     QCheckBox* link_habitats{};
+    QCheckBox* fill_sightings{};
     QPushButton* save_button{};
 
     bool game_running{};

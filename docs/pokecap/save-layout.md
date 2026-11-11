@@ -20,7 +20,7 @@ in the game's save code. Check any save with `tools/pikantine/dex_report.py` (re
 | `m_recipeHistory` | `0x3FCB4C` | `0x2328` | `0x6CFCE4` | byte per recipe |
 | `m_itemHistory` | `0x402ED9` | `0x11F8` | `0x6D6071` | byte per item, bit 0 obtained |
 | `m_pokeSkillHistory` … emote wheel | `0x405047` | `0x2B8` | `0x6D81E4` | PokoHex's abilities |
-| `m_pokemonHistory` | `0x4052FF` | `0x20400` | `0x6D849C` | per Pokémon, layout unknown |
+| `m_pokemonHistory` | `0x4052FF` | `0x20400` | `0x6D849C` | 129 bytes per species row, see below |
 | `m_habitatHistory` | `0x4256FF` | `0x1800` | `0x6F889C` | 12 bytes per habitat id, see below |
 | `m_pokemonDexHistory` | `0x426EFF` | `0x400` | `0x6FA09C` | byte per dex slot, see below |
 | `m_pokemonDexReadHistory` | `0x4272FF` | `0x400` | `0x6FA49C` | byte per dex slot: entry opened |
@@ -46,6 +46,14 @@ in the game's save code. Check any save with `tools/pikantine/dex_report.py` (re
 - Checked on two saves: every named resident (40 in SpiderNic96's town, 134 in a tester's) points
   at a slot that save has registered. `tools/pikantine/dex_tables.py` writes the full table from
   a RomFS dump and names what a save has.
+
+## Sightings record
+
+- `m_pokemonHistory` is 1024 records of 129 bytes, indexed by **species row** (entry #1066's
+  order, not the Pokédex slot): 64 bytes of habitat bits (bit h = habitat id h), the same 64
+  bytes again, then a flag byte (0, 1 or 2; meaning unknown, not the Pokédex state).
+- A habitat's page in the Habitat Dex shows "?" for a Pokémon it draws whose bits lack that
+  habitat. In three real saves every set bit is one of that Pokémon's known habitats.
 
 ## Habitat record
 
