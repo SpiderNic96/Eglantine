@@ -226,12 +226,12 @@ PokopiaSkillsTab::PokopiaSkillsTab(QWidget* parent) : PokopiaSaveTab(parent) {
         const int id = item->data(0, IdRole).toInt();
         const bool on = Ticked(item);
         Mark(item, on != item->data(0, BeforeRole).toBool());
-        if (const Extra* e = ExtraOf(id); e != nullptr) {
+        if (const Extra* extra = ExtraOf(id); extra != nullptr) {
             if (on) {
-                if (auto* move = FindRow(list, e->needs); move && !Ticked(move)) {
+                if (auto* move = FindRow(list, extra->needs); move && !Ticked(move)) {
                     move->setCheckState(0, Qt::Checked);
                 }
-                if (e->key == ExtraBase + 7) {
+                if (extra->key == ExtraBase + 7) {
                     if (auto* dive = FindRow(list, DiveKey); dive && !Ticked(dive)) {
                         dive->setCheckState(0, Qt::Checked);
                     }
@@ -240,10 +240,10 @@ PokopiaSkillsTab::PokopiaSkillsTab(QWidget* parent) : PokopiaSaveTab(parent) {
         } else if (!on) {
             // Unticking a move unticks the new upgrades that need it.
             for (const auto& e : Extras) {
-                auto* extra = FindRow(list, e.key);
-                if (extra && e.needs == id && Ticked(extra) &&
-                    !extra->data(0, BeforeRole).toBool()) {
-                    extra->setCheckState(0, Qt::Unchecked);
+                auto* upgrade = FindRow(list, e.key);
+                if (upgrade && e.needs == id && Ticked(upgrade) &&
+                    !upgrade->data(0, BeforeRole).toBool()) {
+                    upgrade->setCheckState(0, Qt::Unchecked);
                 }
             }
         }
