@@ -59,19 +59,15 @@ ConfigurePikantine::ConfigurePikantine(const Core::System& system_, QWidget* par
     }
     layout->addWidget(cap_box);
 
-    auto* dex_box = new QGroupBox(tr("Pokédex"), this);
+    auto* dex_box = new QGroupBox(tr("Pokédex and habitats"), this);
     auto* dex_layout = new QVBoxLayout(dex_box);
     auto* dex_note = new QLabel(
-        tr("<b>Off for now:</b> the Pokédex histories are confirmed by the 2.0.1 serializer at "
-           "runtime offsets <code>+0x6FA09C</code> and <code>+0x6FA49C</code> (0x400 bytes each), "
-           "but those addresses are outside the current decompressed CMNDAT.BIN buffer. The "
-           "runtime-to-save mapping and Pokémon-to-Dex ID mapping still need verification; the "
-           "editor stays disabled to avoid corrupting saves. The old build-34 flag was not the "
-           "Pokédex."),
+        tr("Register or mark as seen any of the 374 Pokédex entries, and discover or build any "
+           "habitat, by name; each Pokémon shows the habitats it appears in. Edits your 2.0.1 "
+           "save while the game is stopped, and backs it up first."),
         dex_box);
     dex_note->setWordWrap(true);
-    auto* dex_button = new QPushButton(tr("Open the Pokédex editor…"), dex_box);
-    dex_button->setEnabled(false); // runtime history arrays are not mapped into CMNDAT.BIN yet
+    auto* dex_button = new QPushButton(tr("Open the Pokédex and habitat editor…"), dex_box);
     dex_button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
     connect(dex_button, &QPushButton::clicked, this, [this] {
         PokopiaDexDialog dialog(system.IsPoweredOn(), this);

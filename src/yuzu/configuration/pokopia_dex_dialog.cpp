@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <vector>
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDialogButtonBox>
@@ -17,14 +18,16 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSet>
+#include <QTabWidget>
+#include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QtEndian>
 
 #include "common/fs/path_util.h"
-#include "yuzu/configuration/pokopia_residents.h"
+#include "yuzu/configuration/pokopia_dex_data.h"
 
 namespace {
 
@@ -34,13 +37,64 @@ constexpr quint32 Layout201 = 0x0200017D; // 2.0.1's common save
 constexpr quint32 Format = 0x40001;
 constexpr int HeaderSize = 0x130;
 constexpr int DataSize = 0x470CED;
-// No verified offset in the decompressed CMNDAT.BIN payload yet. The 2.0.1 disassembly places
-// m_pokemonDexHistory and m_pokemonDexReadHistory at runtime serializer offsets +0x6FA09C and
-// +0x6FA49C (0x400 bytes each); those are outside DataSize and cannot be used as raw save offsets
-// without first mapping the serializer's x20 base. The previous 0x221758 guess was disproven.
-constexpr int DexOffset = -1;
-constexpr int DexCount = 1050;
+// Field offsets in the unpacked data, from the game's save serializer (main+0x5ca320); see
+// docs/pokecap/save-layout.md.
+constexpr int DexOffset = 0x426EFF;      // m_pokemonDexHistory: a byte per Pokédex slot
+constexpr int DexCount = 0x400;
+constexpr int HabitatOffset = 0x4256FF;  // m_habitatHistory: 12 bytes per habitat id
+constexpr int HabitatCount = 0x1800 / 12;
+constexpr quint8 Registered = 0x03;      // bits 0 and 1
+constexpr quint8 Seen = 0x08;            // bit 3: seen only, a silhouette
 constexpr int IdRole = Qt::UserRole;
+constexpr int StateRole = Qt::UserRole + 1;
+
+int DexStateOf(quint8 flags) {
+    return (flags & Registered) == Registered ? 2 : (flags & Seen) != 0 ? 1 : 0;
+}
+
+int HabitatStateOf(quint32 state) {
+    return state == 3 ? 2 : state != 0 ? 1 : 0;
+}
+
+Qt::CheckState CheckOf(int state) {
+    return state == 2 ? Qt::Checked : state == 1 ? Qt::PartiallyChecked : Qt::Unchecked;
+}
+
+int StateOf(const QTreeWidgetItem* item) {
+    const auto check = item->checkState(0);
+    return check == Qt::Checked ? 2 : check == Qt::PartiallyChecked ? 1 : 0;
+}
+
+QString HabitatName(int id) {
+    for (const auto& h : Pikantine::PokopiaHabitats) {
+        if (h.id == id) {
+            return QString::fromUtf8(h.name);
+        }
+    }
+    return QObject::tr("Habitat #%1").arg(id);
+}
+
+void Filter(QTreeWidget* list, const QString& text) {
+    for (int i = 0; i < list->topLevelItemCount(); ++i) {
+        auto* item = list->topLevelItem(i);
+        bool match = text.isEmpty();
+        for (int c = 0; !match && c < list->columnCount(); ++c) {
+            match = item->text(c).contains(text, Qt::CaseInsensitive);
+        }
+        item->setHidden(!match);
+    }
+}
+
+QTreeWidget* MakeList(QWidget* parent, const QStringList& headers) {
+    auto* list = new QTreeWidget(parent);
+    list->setHeaderLabels(headers);
+    list->setRootIsDecorated(false);
+    list->setUniformRowHeights(true);
+    list->setAlternatingRowColors(true);
+    list->setColumnWidth(0, 230);
+    list->setColumnWidth(1, 50);
+    return list;
+}
 
 QString CommonPath(const QString& folder) {
     return QDir(folder).filePath(QStringLiteral("G00/CMNDAT.BIN"));
@@ -105,14 +159,16 @@ bool CopyFolder(const QString& from, const QString& to) {
 
 PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
     : QDialog(parent), game_running{game_running_} {
-    setWindowTitle(tr("Pikantine: Pokopia Pokédex editor"));
-    resize(560, 640);
+    setWindowTitle(tr("Pikantine: Pokopia Pokédex and habitats"));
+    resize(760, 700);
     auto* layout = new QVBoxLayout(this);
 
     auto* note = new QLabel(
-        tr("Tick the Pokémon to register in your Pokédex, then <b>Save</b>. Ticked ones that are "
-           "<span style='color:#2e7d32'>green</span> are new. Your save folder is backed up "
-           "first. For Pokopia <b>2.0.1</b> saves; experimental, so keep your own backup too."),
+        tr("Click a box to cycle it: empty = not yet, <b>half</b> = seen (Pokédex) or discovered "
+           "(habitat), <b>ticked</b> = registered or built. Changes show "
+           "<span style='color:#2e7d32'>green</span>; nothing is written until <b>Save</b>, and "
+           "your save folder is backed up first. Dex rewards (recipes) are left for the game to "
+           "hand out. For Pokopia <b>2.0.1</b> saves; keep your own backup too."),
         this);
     note->setWordWrap(true);
     layout->addWidget(note);
@@ -125,20 +181,44 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
     layout->addLayout(row);
 
     status = new QLabel(this);
+    status->setWordWrap(true);
     layout->addWidget(status);
 
-    search = new QLineEdit(this);
-    search->setPlaceholderText(tr("Search"));
-    search->setClearButtonEnabled(true);
-    layout->addWidget(search);
+    auto* tabs = new QTabWidget(this);
+    auto* dex_page = new QWidget(tabs);
+    auto* dex_layout = new QVBoxLayout(dex_page);
+    dex_search = new QLineEdit(dex_page);
+    dex_search->setPlaceholderText(tr("Search Pokémon or habitat"));
+    dex_search->setClearButtonEnabled(true);
+    dex_list = MakeList(dex_page, {tr("Pokémon"), tr("Slot"), tr("Appears in (habitats)")});
+    dex_layout->addWidget(dex_search);
+    dex_layout->addWidget(dex_list, 1);
+    tabs->addTab(dex_page, tr("Pokédex"));
 
-    list = new QListWidget(this);
-    layout->addWidget(list, 1);
+    auto* habitat_page = new QWidget(tabs);
+    auto* habitat_layout = new QVBoxLayout(habitat_page);
+    habitat_search = new QLineEdit(habitat_page);
+    habitat_search->setPlaceholderText(tr("Search habitat or Pokémon"));
+    habitat_search->setClearButtonEnabled(true);
+    habitat_list = MakeList(habitat_page, {tr("Habitat"), tr("Id"), tr("Draws (Pokémon)")});
+    habitat_layout->addWidget(habitat_search);
+    habitat_layout->addWidget(habitat_list, 1);
+    tabs->addTab(habitat_page, tr("Habitats"));
+    layout->addWidget(tabs, 1);
+
+    link_habitats = new QCheckBox(
+        tr("When a Pokémon gets registered, also mark its habitats discovered"), this);
+    link_habitats->setChecked(true);
+    layout->addWidget(link_habitats);
 
     auto* actions = new QHBoxLayout();
-    auto* tick_all = new QPushButton(tr("Tick all"), this);
+    auto* unlock_all = new QPushButton(tr("Unlock everything"), this);
+    unlock_all->setToolTip(tr("Every Pokémon registered and every habitat built."));
+    auto* tick_shown = new QPushButton(tr("Tick the ones shown"), this);
+    tick_shown->setToolTip(tr("Registers or builds every entry the search shows, on this tab."));
     auto* reset = new QPushButton(tr("Back to the save"), this);
-    actions->addWidget(tick_all);
+    actions->addWidget(unlock_all);
+    actions->addWidget(tick_shown);
     actions->addWidget(reset);
     actions->addStretch(1);
     layout->addLayout(actions);
@@ -165,20 +245,35 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
             LoadSave(folders->itemData(index).toString());
         }
     });
-    connect(search, &QLineEdit::textChanged, this, &PokopiaDexDialog::Filter);
-    connect(list, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) {
-        if (populating) {
+    connect(dex_search, &QLineEdit::textChanged, this,
+            [this](const QString& text) { Filter(dex_list, text); });
+    connect(habitat_search, &QLineEdit::textChanged, this,
+            [this](const QString& text) { Filter(habitat_list, text); });
+    const auto changed = [this](QTreeWidgetItem* item, int column) {
+        if (populating || column != 0) {
             return;
         }
-        const bool fresh = item->checkState() == Qt::Checked &&
-                           !registered.contains(item->data(IdRole).toInt());
-        item->setForeground(fresh ? QColor(0x2e, 0x7d, 0x32) : palette().color(QPalette::Text));
+        const bool fresh = StateOf(item) != item->data(0, StateRole).toInt();
+        const QBrush brush = fresh ? QBrush(QColor(0x2e, 0x7d, 0x32)) : QBrush();
+        for (int c = 0; c < item->columnCount(); ++c) {
+            item->setForeground(c, brush);
+        }
         UpdateCount();
+    };
+    connect(dex_list, &QTreeWidget::itemChanged, this, changed);
+    connect(habitat_list, &QTreeWidget::itemChanged, this, changed);
+    connect(unlock_all, &QPushButton::clicked, this, [this] {
+        for (auto* list : {dex_list, habitat_list}) {
+            for (int i = 0; i < list->topLevelItemCount(); ++i) {
+                list->topLevelItem(i)->setCheckState(0, Qt::Checked);
+            }
+        }
     });
-    connect(tick_all, &QPushButton::clicked, this, [this] {
-        for (int i = 0; i < list->count(); ++i) {
-            if (!list->item(i)->isHidden()) {
-                list->item(i)->setCheckState(Qt::Checked);
+    connect(tick_shown, &QPushButton::clicked, this, [this, tabs] {
+        auto* list = tabs->currentIndex() == 0 ? dex_list : habitat_list;
+        for (int i = 0; i < list->topLevelItemCount(); ++i) {
+            if (!list->topLevelItem(i)->isHidden()) {
+                list->topLevelItem(i)->setCheckState(0, Qt::Checked);
             }
         }
     });
@@ -211,8 +306,10 @@ void PokopiaDexDialog::FindSaves() {
 
 void PokopiaDexDialog::LoadSave(const QString& path) {
     folder = path;
-    list->clear();
-    registered.clear();
+    dex_list->clear();
+    habitat_list->clear();
+    dex_state.clear();
+    habitat_state.clear();
     data.clear();
     QFile in(CommonPath(path));
     if (!in.open(QIODevice::ReadOnly)) {
@@ -228,47 +325,83 @@ void PokopiaDexDialog::LoadSave(const QString& path) {
         save_button->setEnabled(false);
         return;
     }
-    if (DexOffset < 0 || DexOffset > data.size() - DexCount) {
-        status->setText(tr("The Pokédex save offset is not verified for this save layout. "
-                           "The editor is locked to protect your save; no bytes were changed."));
-        save_button->setEnabled(false);
-        return;
+    for (int slot = 0; slot < DexCount; ++slot) {
+        dex_state[slot] = DexStateOf(static_cast<quint8>(data[DexOffset + slot]));
     }
-    for (int id = 0; id < DexCount; ++id) {
-        if (static_cast<quint8>(data[DexOffset + id]) & 1) {
-            registered.insert(id);
-        }
+    for (int id = 0; id < HabitatCount; ++id) {
+        habitat_state[id] = HabitatStateOf(Le32(data, HabitatOffset + id * 12));
     }
     save_button->setEnabled(!game_running);
     Populate();
 }
 
 void PokopiaDexDialog::Populate() {
+    if (data.isEmpty()) {
+        return;
+    }
     populating = true;
-    list->clear();
-    std::vector<Pikantine::Resident> rows(Pikantine::PokopiaResidents.begin(),
-                                          Pikantine::PokopiaResidents.end());
-    // Registered residents the name list does not know still show, by their id.
-    for (const int id : registered) {
-        const bool named = std::any_of(rows.begin(), rows.end(),
-                                       [id](const auto& r) { return r.id == id; });
-        if (!named) {
-            rows.push_back({static_cast<u16>(id), 0xffff, nullptr});
+    dex_list->clear();
+    habitat_list->clear();
+
+    QHash<int, QStringList> draws; // habitat id -> Pokémon that appear in it
+    QSet<int> named_slots;
+    for (const auto& p : Pikantine::PokopiaDexSlots) {
+        named_slots.insert(p.slot);
+        QStringList where;
+        for (const u16 h : p.habitats) {
+            if (h != 0) {
+                where << HabitatName(h);
+                draws[h] << QString::fromUtf8(p.name);
+            }
+        }
+        auto* item = new QTreeWidgetItem(dex_list);
+        item->setText(0, QString::fromUtf8(p.name));
+        item->setText(1, QString::number(p.slot));
+        item->setText(2, where.isEmpty() ? tr("(special: story, event or not mapped)")
+                                         : where.join(QStringLiteral(", ")));
+        item->setData(0, IdRole, p.slot);
+    }
+    // Slots the save uses that the table does not name still show, by number.
+    for (int slot = 1; slot < DexCount; ++slot) {
+        if (dex_state.value(slot) != 0 && !named_slots.contains(slot)) {
+            auto* item = new QTreeWidgetItem(dex_list);
+            item->setText(0, tr("Slot %1").arg(slot));
+            item->setText(1, QString::number(slot));
+            item->setData(0, IdRole, slot);
         }
     }
-    std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
-        return a.portrait != b.portrait ? a.portrait < b.portrait : a.id < b.id;
-    });
-    for (const auto& r : rows) {
-        const QString name = r.name != nullptr ? QString::fromUtf8(r.name)
-                                               : tr("Resident %1").arg(r.id, 4, 10, QLatin1Char('0'));
-        auto* item = new QListWidgetItem(QStringLiteral("%1  (#%2)").arg(name).arg(r.id), list);
-        item->setData(IdRole, static_cast<int>(r.id));
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(registered.contains(r.id) ? Qt::Checked : Qt::Unchecked);
+
+    QSet<int> named_habitats;
+    for (const auto& h : Pikantine::PokopiaHabitats) {
+        named_habitats.insert(h.id);
+        auto* item = new QTreeWidgetItem(habitat_list);
+        item->setText(0, QString::fromUtf8(h.name));
+        item->setText(1, QString::number(h.id));
+        item->setText(2, draws.value(h.id).join(QStringLiteral(", ")));
+        item->setData(0, IdRole, static_cast<int>(h.id));
+    }
+    for (int id = 1; id < HabitatCount; ++id) {
+        if (habitat_state.value(id) != 0 && !named_habitats.contains(id)) {
+            auto* item = new QTreeWidgetItem(habitat_list);
+            item->setText(0, HabitatName(id));
+            item->setText(1, QString::number(id));
+            item->setData(0, IdRole, id);
+        }
+    }
+
+    for (auto* list : {dex_list, habitat_list}) {
+        const auto& states = list == dex_list ? dex_state : habitat_state;
+        for (int i = 0; i < list->topLevelItemCount(); ++i) {
+            auto* item = list->topLevelItem(i);
+            const int state = states.value(item->data(0, IdRole).toInt());
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsUserTristate);
+            item->setData(0, StateRole, state);
+            item->setCheckState(0, CheckOf(state));
+        }
     }
     populating = false;
-    Filter(search->text());
+    Filter(dex_list, dex_search->text());
+    Filter(habitat_list, habitat_search->text());
     UpdateCount();
 }
 
@@ -276,55 +409,116 @@ void PokopiaDexDialog::UpdateCount() {
     if (data.isEmpty()) {
         return;
     }
-    int ticked = 0, fresh = 0;
-    for (int i = 0; i < list->count(); ++i) {
-        const auto* item = list->item(i);
-        if (item->checkState() == Qt::Checked) {
-            ++ticked;
-            fresh += registered.contains(item->data(IdRole).toInt()) ? 0 : 1;
+    const auto count = [](QTreeWidget* list, int* full, int* half, int* changed) {
+        *full = *half = *changed = 0;
+        for (int i = 0; i < list->topLevelItemCount(); ++i) {
+            const auto* item = list->topLevelItem(i);
+            const int state = StateOf(item);
+            *full += state == 2 ? 1 : 0;
+            *half += state == 1 ? 1 : 0;
+            *changed += state != item->data(0, StateRole).toInt() ? 1 : 0;
         }
-    }
-    status->setText(tr("Registered in this save: %1. Ticked: %2 (%3 new).")
-                        .arg(registered.size())
-                        .arg(ticked)
-                        .arg(fresh));
-}
-
-void PokopiaDexDialog::Filter(const QString& text) {
-    for (int i = 0; i < list->count(); ++i) {
-        auto* item = list->item(i);
-        item->setHidden(!text.isEmpty() && !item->text().contains(text, Qt::CaseInsensitive));
-    }
+    };
+    int registered, seen, dex_changed, built, discovered, habitat_changed;
+    count(dex_list, &registered, &seen, &dex_changed);
+    count(habitat_list, &built, &discovered, &habitat_changed);
+    status->setText(tr("Pokédex: %1 registered, %2 seen (of %3). Habitats: %4 built, %5 "
+                       "discovered (of %6). Changes not saved yet: %7.")
+                        .arg(registered)
+                        .arg(seen)
+                        .arg(dex_list->topLevelItemCount())
+                        .arg(built)
+                        .arg(discovered)
+                        .arg(habitat_list->topLevelItemCount())
+                        .arg(dex_changed + habitat_changed));
 }
 
 void PokopiaDexDialog::Save() {
-    if (data.isEmpty() || game_running || DexOffset < 0 || DexOffset > data.size() - DexCount) {
+    if (data.isEmpty() || game_running) {
         return;
     }
     QByteArray edited = data;
-    int added = 0, removed = 0;
-    for (int i = 0; i < list->count(); ++i) {
-        const auto* item = list->item(i);
-        const int id = item->data(IdRole).toInt();
-        auto& flags = reinterpret_cast<quint8&>(edited[DexOffset + id]);
-        const bool want = item->checkState() == Qt::Checked;
-        if (want && !(flags & 1)) {
-            flags |= 1;
-            ++added;
-        } else if (!want && (flags & 1)) {
-            flags &= ~1;
+    QHash<int, int> habitats; // id -> wanted state
+    for (int i = 0; i < habitat_list->topLevelItemCount(); ++i) {
+        const auto* item = habitat_list->topLevelItem(i);
+        habitats[item->data(0, IdRole).toInt()] = StateOf(item);
+    }
+
+    int registered = 0, seen = 0, cleared = 0, linked = 0;
+    for (int i = 0; i < dex_list->topLevelItemCount(); ++i) {
+        const auto* item = dex_list->topLevelItem(i);
+        const int slot = item->data(0, IdRole).toInt();
+        const int want = StateOf(item);
+        if (slot <= 0 || slot >= DexCount) {
+            continue;
+        }
+        if (want == 2 && link_habitats->isChecked()) {
+            for (const auto& p : Pikantine::PokopiaDexSlots) {
+                if (p.slot != slot) {
+                    continue;
+                }
+                for (const u16 h : p.habitats) {
+                    if (h != 0 && habitats.value(h) == 0) {
+                        habitats[h] = 1;
+                        ++linked;
+                    }
+                }
+            }
+        }
+        if (want == dex_state.value(slot)) {
+            continue;
+        }
+        auto& flags = reinterpret_cast<quint8&>(edited[DexOffset + slot]);
+        if (want == 2) {
+            flags |= Registered;
+            ++registered;
+        } else if (want == 1) {
+            flags = static_cast<quint8>((flags & ~Registered) | Seen);
+            ++seen;
+        } else {
+            flags = 0;
+            ++cleared;
+        }
+    }
+
+    int built = 0, discovered = 0, removed = 0;
+    for (auto it = habitats.cbegin(); it != habitats.cend(); ++it) {
+        const int id = it.key();
+        if (id <= 0 || id >= HabitatCount || it.value() == habitat_state.value(id)) {
+            continue;
+        }
+        char* record = edited.data() + HabitatOffset + id * 12;
+        if (it.value() == 2) {
+            qToLittleEndian<quint32>(3, record);
+            ++built;
+        } else if (it.value() == 1) {
+            qToLittleEndian<quint32>(1, record);
+            ++discovered;
+        } else {
+            std::fill_n(record, 12, '\0');
             ++removed;
         }
     }
-    if (added == 0 && removed == 0) {
+
+    if (edited == data) {
         QMessageBox::information(this, windowTitle(), tr("Nothing to change."));
         return;
     }
+    QString summary = tr("Pokédex: %1 registered, %2 set to seen, %3 cleared.\nHabitats: %4 "
+                         "built, %5 discovered, %6 cleared.")
+                          .arg(registered)
+                          .arg(seen)
+                          .arg(cleared)
+                          .arg(built)
+                          .arg(discovered)
+                          .arg(removed);
+    if (linked > 0) {
+        summary += tr("\n(%1 of those habitats come from the Pokémon you registered.)").arg(linked);
+    }
     if (QMessageBox::question(this, windowTitle(),
-                              tr("Register %1 and unregister %2 Pokémon in this save?\n\nThe save "
-                                 "folder is backed up first.")
-                                  .arg(added)
-                                  .arg(removed)) != QMessageBox::Yes) {
+                              tr("%1\n\nWrite this to the save? The save folder is backed up "
+                                 "first.")
+                                  .arg(summary)) != QMessageBox::Yes) {
         return;
     }
 

@@ -5,22 +5,23 @@
 
 #include <QByteArray>
 #include <QDialog>
-#include <QSet>
+#include <QHash>
 
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
-class QListWidget;
-class QListWidgetItem;
 class QPushButton;
+class QTreeWidget;
+class QTreeWidgetItem;
 
-/// Pikantine's Pokédex editor for Pokémon Pokopia 2.0.1 saves.
+/// Pikantine's Pokédex and Habitat Dex editor for Pokémon Pokopia 2.0.1 saves.
 ///
-/// The common save (G00/CMNDAT.BIN: a 0x130-byte header, then zlib) holds a byte per resident
-/// (0..1049) at 0x221758 of its data; bit 0 is "registered in the Pokédex" (the game's own
-/// "No. Registered" counts them). The dialog lists the residents by their portrait order (the
-/// Pokédex's), shows which are registered, and sets bit 0 on the ones picked. It backs the save
-/// folder up first and checks what it wrote by reading it back.
+/// The common save (G00/CMNDAT.BIN: a 0x130-byte header, then zlib) keeps a byte per Pokédex
+/// slot at 0x426EFF of its data (bits 0+1 registered, bit 3 seen) and 12 bytes per habitat id at
+/// 0x4256FF (u32 state: 1 discovered, 3 built). The slot and habitat names come from the game's
+/// own tables (pokopia_dex_data.h). The dialog backs the save folder up first and checks what it
+/// wrote by reading it back. Dex rewards are left alone, so the game hands them out itself.
 class PokopiaDexDialog : public QDialog {
     Q_OBJECT
 
@@ -33,19 +34,22 @@ private:
     void LoadSave(const QString& folder);
     void Populate();
     void UpdateCount();
-    void Filter(const QString& text);
     void Save();
 
     QComboBox* folders{};
     QLabel* status{};
-    QLineEdit* search{};
-    QListWidget* list{};
+    QLineEdit* dex_search{};
+    QLineEdit* habitat_search{};
+    QTreeWidget* dex_list{};
+    QTreeWidget* habitat_list{};
+    QCheckBox* link_habitats{};
     QPushButton* save_button{};
 
     bool game_running{};
-    QString folder;      // the save folder (holds G00)
-    QByteArray file;     // G00/CMNDAT.BIN as read
-    QByteArray data;     // its data, unpacked
-    QSet<int> registered; // as in the save
+    QString folder;   // the save folder (holds G00)
+    QByteArray file;  // G00/CMNDAT.BIN as read
+    QByteArray data;  // its data, unpacked
+    QHash<int, int> dex_state;     // slot -> 0 none, 1 seen, 2 registered (as in the save)
+    QHash<int, int> habitat_state; // id -> 0 none, 1 discovered, 2 built (as in the save)
     bool populating{};
 };

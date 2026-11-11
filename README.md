@@ -33,7 +33,7 @@ Everything here is for **Pokémon Pokopia 2.0.1** (build ID `76A489F3…`), only
 | Keyboard and mouse | Generic | A ready-made **Pokopia keyboard and mouse** input profile; a tool that turns the button prompts into keyboard and mouse glyphs (texture mod) |
 | Texture mods | — | Texture dumping and replacement (`EDEN_TEXTURE_DUMP`, `tools/texture_mods`) |
 | Minimap | — | The game's own map, **live on screen while you play**: you, Pokémon walking around, buildings and exits, north up |
-| Settings | — | A **Pikantine** page in Settings: minimap on or off, the Pokémon limit (a Pokédex editor is coming) |
+| Settings | — | A **Pikantine** page in Settings: minimap on or off, the Pokémon limit, the Pokédex and habitat editor |
 | Waypoints | — | A **ping** with an arrow and its distance at the top of the screen; set it with **G**, a click on the pause menu's map, **L3+R3**, or the **right stick and R3 on the pause map** |
 | Pokémon limit | The game's own (25 living, 30 in all) | **Up to 50** (default 30); raised a couple at a time once you are in play, so loading stays fast |
 | Builds | Every platform, on pushes to `main` | Every configured platform, on pushes to `main`; channel `pokecap-build-<n>` |
@@ -72,9 +72,16 @@ How it works:
 > [!WARNING]
 > Back up your save before raising the limit. Going back to a build without it may have the game send the extra Pokémon away.
 
-### Pokédex editor (off for now)
+### Pokédex and habitat editor
 
-The first version (build 34) changed a save flag that turned out not to be the Pokédex, so ticked Pokémon did not register; it is switched off until the Pokédex's own save data is found. If you saved with it, put your save back from the `pikantine_backups` folder in Eglantine's folder.
+Settings → Pikantine → **Open the Pokédex and habitat editor**, with the game stopped.
+
+- **Pokédex tab:** all 374 entries by name, with the habitats each one appears in. Click a box to cycle it: empty (not yet), half (seen), ticked (registered).
+- **Habitats tab:** every habitat by name, with the Pokémon it draws: empty, half (discovered), ticked (built).
+- **Unlock everything** registers every Pokémon and builds every habitat. Registering a Pokémon also marks its habitats discovered, unless you untick that option.
+- Dex rewards (the recipes at 6, 15, 20… registered) are left unclaimed, so the game hands them out itself.
+- The save folder is copied to `pikantine_backups` in Eglantine's folder before anything is written. Only Pokopia 2.0.1 saves are edited.
+- Names come from the game's own tables (see [docs/pokecap/save-layout.md](docs/pokecap/save-layout.md)). Which habitats draw which Pokémon comes from the public Pokopia database (cliffchang11/Pokopia_Cliff); 24 special Pokémon (legendaries, story and 2.0 additions) have none listed.
 
 ### Mouse in menus and in play
 
