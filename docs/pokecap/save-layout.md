@@ -17,7 +17,7 @@ in the game's save code. Check any save with `tools/pikantine/dex_report.py` (re
 
 | Field | File offset | Size | Memory (root +) | One entry |
 |---|---|---|---|---|
-| `m_recipeHistory` | `0x3FCB4C` | `0x2328` | `0x6CFCE4` | byte per recipe |
+| `m_recipeHistory` | `0x3FCB4C` | `0x2328` | `0x6CFCE4` | 6 bytes per recipe, see below |
 | `m_itemHistory` | `0x402ED9` | `0x11F8` | `0x6D6071` | byte per item, bit 0 obtained |
 | `m_pokeSkillHistory` … emote wheel | `0x405047` | `0x2B8` | `0x6D81E4` | PokoHex's abilities |
 | `m_pokemonHistory` | `0x4052FF` | `0x20400` | `0x6D849C` | 129 bytes per species row, see below |
@@ -46,6 +46,13 @@ in the game's save code. Check any save with `tools/pikantine/dex_report.py` (re
 - Checked on two saves: every named resident (40 in SpiderNic96's town, 134 in a tester's) points
   at a slot that save has registered. `tools/pikantine/dex_tables.py` writes the full table from
   a RomFS dump and names what a save has.
+
+## Recipe record
+
+- `m_recipeHistory` is 1500 records of 6 bytes, indexed by recipe (table #493, whose `u16` at
+  `+18` is the item made; its name via item table #983 `+34` and names #4646): `u16` 0, `u16` the
+  order it was learned in (1, 2, 3…), `u16` flags (2 learned, still new; 10 and 26 seen/made).
+- 921 of the 1500 rows make a named item.
 
 ## Sightings record
 

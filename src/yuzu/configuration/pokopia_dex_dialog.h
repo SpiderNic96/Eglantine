@@ -6,6 +6,7 @@
 #include <QByteArray>
 #include <QDialog>
 #include <QHash>
+#include <QSet>
 
 class QCheckBox;
 class QComboBox;
@@ -41,10 +42,12 @@ private:
     QLabel* status{};
     QLineEdit* dex_search{};
     QLineEdit* habitat_search{};
+    QLineEdit* recipe_search{};
     QComboBox* dex_area{};
     QComboBox* habitat_area{};
     QTreeWidget* dex_list{};
     QTreeWidget* habitat_list{};
+    QTreeWidget* recipe_list{};
     QCheckBox* link_habitats{};
     QCheckBox* fill_sightings{};
     QPushButton* save_button{};
@@ -55,5 +58,6 @@ private:
     QByteArray data;  // its data, unpacked
     QHash<int, int> dex_state;     // slot -> 0 none, 1 seen, 2 registered (as in the save)
     QHash<int, int> habitat_state; // id -> 0 none, 1 discovered, 2 built (as in the save)
+    QSet<int> learned;             // recipe indices the save has
     bool populating{};
 };

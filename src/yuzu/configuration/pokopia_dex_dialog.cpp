@@ -28,6 +28,7 @@
 
 #include "common/fs/path_util.h"
 #include "yuzu/configuration/pokopia_dex_data.h"
+#include "yuzu/configuration/pokopia_recipe_data.h"
 
 namespace {
 
@@ -49,6 +50,11 @@ constexpr int HabitatCount = 0x1800 / 12;
 constexpr int HistoryOffset = 0x4052FF;
 constexpr int HistoryRecord = 129;
 constexpr int HistoryCount = 0x20400 / HistoryRecord;
+// m_recipeHistory: 6 bytes per recipe index (#493): u16 0, u16 the order it was learned in, u16
+// flags (2 learned and new; 10 and 26 once seen and made). The editor only adds recipes.
+constexpr int RecipeOffset = 0x3FCB4C;
+constexpr int RecipeCount = 0x2328 / 6;
+constexpr quint16 RecipeNew = 2;
 constexpr quint8 Registered = 0x03;      // bits 0 and 1
 constexpr quint8 Seen = 0x08;            // bit 3: seen only, a silhouette
 constexpr int IdRole = Qt::UserRole;
@@ -254,6 +260,16 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
     habitat_layout->addLayout(habitat_filters);
     habitat_layout->addWidget(habitat_list, 1);
     tabs->addTab(habitat_page, tr("Habitats"));
+
+    auto* recipe_page = new QWidget(tabs);
+    auto* recipe_layout = new QVBoxLayout(recipe_page);
+    recipe_search = new QLineEdit(recipe_page);
+    recipe_search->setPlaceholderText(tr("Search recipes"));
+    recipe_search->setClearButtonEnabled(true);
+    recipe_list = MakeList(recipe_page, {tr("Recipe (the item it makes)"), tr("Id")});
+    recipe_layout->addWidget(recipe_search);
+    recipe_layout->addWidget(recipe_list, 1);
+    tabs->addTab(recipe_page, tr("Recipes"));
     layout->addWidget(tabs, 1);
 
     link_habitats = new QCheckBox(
@@ -269,7 +285,7 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
 
     auto* actions = new QHBoxLayout();
     auto* unlock_all = new QPushButton(tr("Unlock everything"), this);
-    unlock_all->setToolTip(tr("Every Pokémon registered and every habitat built."));
+    unlock_all->setToolTip(tr("Every Pokémon registered, every habitat built, every recipe learned."));
     auto* tick_shown = new QPushButton(tr("Tick the ones shown"), this);
     tick_shown->setToolTip(tr("Registers or builds every entry the search shows, on this tab."));
     auto* reset = new QPushButton(tr("Back to the save"), this);
@@ -305,6 +321,7 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
     connect(habitat_search, &QLineEdit::textChanged, this, &PokopiaDexDialog::Refilter);
     connect(dex_area, &QComboBox::currentIndexChanged, this, &PokopiaDexDialog::Refilter);
     connect(habitat_area, &QComboBox::currentIndexChanged, this, &PokopiaDexDialog::Refilter);
+    connect(recipe_search, &QLineEdit::textChanged, this, &PokopiaDexDialog::Refilter);
     const auto changed = [this](QTreeWidgetItem* item, int column) {
         if (populating || column != 0) {
             return;
@@ -318,15 +335,18 @@ PokopiaDexDialog::PokopiaDexDialog(bool game_running_, QWidget* parent)
     };
     connect(dex_list, &QTreeWidget::itemChanged, this, changed);
     connect(habitat_list, &QTreeWidget::itemChanged, this, changed);
+    connect(recipe_list, &QTreeWidget::itemChanged, this, changed);
     connect(unlock_all, &QPushButton::clicked, this, [this] {
-        for (auto* list : {dex_list, habitat_list}) {
+        for (auto* list : {dex_list, habitat_list, recipe_list}) {
             for (int i = 0; i < list->topLevelItemCount(); ++i) {
                 list->topLevelItem(i)->setCheckState(0, Qt::Checked);
             }
         }
     });
     connect(tick_shown, &QPushButton::clicked, this, [this, tabs] {
-        auto* list = tabs->currentIndex() == 0 ? dex_list : habitat_list;
+        auto* list = tabs->currentIndex() == 0   ? dex_list
+                     : tabs->currentIndex() == 1 ? habitat_list
+                                                 : recipe_list;
         for (int i = 0; i < list->topLevelItemCount(); ++i) {
             if (!list->topLevelItem(i)->isHidden()) {
                 list->topLevelItem(i)->setCheckState(0, Qt::Checked);
@@ -345,6 +365,7 @@ PokopiaDexDialog::~PokopiaDexDialog() = default;
 void PokopiaDexDialog::Refilter() {
     Filter(dex_list, dex_search->text(), dex_area->currentData().toInt());
     Filter(habitat_list, habitat_search->text(), habitat_area->currentData().toInt());
+    Filter(recipe_list, recipe_search->text());
 }
 
 void PokopiaDexDialog::FindSaves() {
@@ -369,8 +390,10 @@ void PokopiaDexDialog::LoadSave(const QString& path) {
     folder = path;
     dex_list->clear();
     habitat_list->clear();
+    recipe_list->clear();
     dex_state.clear();
     habitat_state.clear();
+    learned.clear();
     data.clear();
     QFile in(CommonPath(path));
     if (!in.open(QIODevice::ReadOnly)) {
@@ -392,6 +415,12 @@ void PokopiaDexDialog::LoadSave(const QString& path) {
     for (int id = 0; id < HabitatCount; ++id) {
         habitat_state[id] = HabitatStateOf(Le32(data, HabitatOffset + id * 12));
     }
+    for (int i = 0; i < RecipeCount; ++i) {
+        const char* record = data.constData() + RecipeOffset + i * 6;
+        if (std::any_of(record, record + 6, [](char c) { return c != 0; })) {
+            learned.insert(i);
+        }
+    }
     save_button->setEnabled(!game_running);
     Populate();
 }
@@ -403,6 +432,23 @@ void PokopiaDexDialog::Populate() {
     populating = true;
     dex_list->clear();
     habitat_list->clear();
+    recipe_list->clear();
+    for (const auto& r : Pikantine::PokopiaRecipes) {
+        auto* item = new QTreeWidgetItem(recipe_list);
+        item->setText(0, QString::fromUtf8(r.name));
+        item->setText(1, QString::number(r.index));
+        item->setData(0, IdRole, static_cast<int>(r.index));
+        const bool known = learned.contains(r.index);
+        item->setData(0, StateRole, known ? 2 : 0);
+        item->setCheckState(0, known ? Qt::Checked : Qt::Unchecked);
+        if (known) {
+            // Already learned: kept, the editor only adds recipes.
+            item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
+            item->setToolTip(0, tr("Already learned"));
+        } else {
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        }
+    }
 
     QHash<int, QStringList> draws; // habitat id -> Pokémon that appear in it
     QHash<int, int> habitat_areas; // habitat id -> areas any of them appear in
@@ -491,15 +537,19 @@ void PokopiaDexDialog::UpdateCount() {
     int registered, seen, dex_changed, built, discovered, habitat_changed;
     count(dex_list, &registered, &seen, &dex_changed);
     count(habitat_list, &built, &discovered, &habitat_changed);
+    int recipes, recipe_half, recipe_changed;
+    count(recipe_list, &recipes, &recipe_half, &recipe_changed);
     status->setText(tr("Pokédex: %1 registered, %2 seen (of %3). Habitats: %4 built, %5 "
-                       "discovered (of %6). Changes not saved yet: %7.")
+                       "discovered (of %6). Recipes: %8 of %9. Changes not saved yet: %7.")
                         .arg(registered)
                         .arg(seen)
                         .arg(dex_list->topLevelItemCount())
                         .arg(built)
                         .arg(discovered)
                         .arg(habitat_list->topLevelItemCount())
-                        .arg(dex_changed + habitat_changed));
+                        .arg(dex_changed + habitat_changed + recipe_changed)
+                        .arg(recipes)
+                        .arg(recipe_list->topLevelItemCount()));
 }
 
 void PokopiaDexDialog::Save() {
@@ -582,6 +632,29 @@ void PokopiaDexDialog::Save() {
         }
     }
 
+    // Recipes: only added, after the last one learned, flagged new.
+    int taught = 0;
+    {
+        quint16 order = 0;
+        for (const int i : learned) {
+            order = std::max(order, qFromLittleEndian<quint16>(data.constData() + RecipeOffset +
+                                                               i * 6 + 2));
+        }
+        for (int i = 0; i < recipe_list->topLevelItemCount(); ++i) {
+            const auto* item = recipe_list->topLevelItem(i);
+            const int index = item->data(0, IdRole).toInt();
+            if (StateOf(item) != 2 || learned.contains(index) || index <= 0 ||
+                index >= RecipeCount) {
+                continue;
+            }
+            char* record = edited.data() + RecipeOffset + index * 6;
+            qToLittleEndian<quint16>(0, record);
+            qToLittleEndian<quint16>(++order, record + 2);
+            qToLittleEndian<quint16>(RecipeNew, record + 4);
+            ++taught;
+        }
+    }
+
     int built = 0, discovered = 0, removed = 0;
     for (auto it = habitats.cbegin(); it != habitats.cend(); ++it) {
         const int id = it.key();
@@ -613,6 +686,9 @@ void PokopiaDexDialog::Save() {
                           .arg(built)
                           .arg(discovered)
                           .arg(removed);
+    if (taught > 0) {
+        summary += tr("\nRecipes: %1 learned.").arg(taught);
+    }
     if (sighted > 0) {
         summary += tr("\nSightings: %1 Pokémon marked as seen in more of their habitats.")
                        .arg(sighted);

@@ -127,6 +127,7 @@ add_executable(yuzu
     configuration/pokopia_dex_dialog.cpp
     configuration/pokopia_dex_dialog.h
     configuration/pokopia_dex_data.h
+    configuration/pokopia_recipe_data.h
     configuration/configure_network.h
     configuration/configure_network.ui
     configuration/configure_system.cpp
