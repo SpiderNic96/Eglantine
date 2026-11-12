@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "yuzu/pokopia_glyph_plan.h"
+#include "yuzu/pokopia_controls.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -41,7 +43,7 @@ constexpr int RingAlpha = 191;
 
 // What a glyph shows.
 struct Look {
-    enum Kind { Keep, Key, Mouse, Face, Disc, Cluster, Arrow } kind = Keep;
+    enum Kind { Keep, Key, Mouse, Face, Disc, Cluster, Arrow, Icon } kind = Keep;
     QString label;  // Key / Disc text; Mouse: left, right, middle, move, wheel; Face: circle,
                     // cross, triangle, square; Arrow: up, down, left, right
     QString label2; // Cluster: the second row
@@ -163,9 +165,9 @@ Look PlayStationLook(int physical, int own) {
     case ZR:
         return {Look::Key, QStringLiteral("R2"), {}};
     case Plus:
-        return {Look::Key, QStringLiteral("OPTIONS"), {}};
+        return {Look::Icon, QStringLiteral("options"), {}};
     case Minus:
-        return {Look::Key, QStringLiteral("CREATE"), {}};
+        return {Look::Icon, QStringLiteral("create"), {}};
     case LStick:
         return {Look::Disc, QStringLiteral("L3"), {}};
     case RStick:
@@ -459,6 +461,30 @@ QImage Draw(const Look& look, int w, int h) {
         Triangle(p, outer.center(), outer.width() * 0.22, dir);
         break;
     }
+    case Look::Icon: {
+        // The DualSense's own marks: three bars for Options, three rays for Create.
+        const QRectF inner = Cap(p, W, H);
+        const QPointF c = inner.center();
+        const qreal unit = std::min(inner.width(), inner.height());
+        p.setPen(QPen(Dark, unit * 0.12, Qt::SolidLine, Qt::RoundCap));
+        if (look.label == QStringLiteral("options")) {
+            const qreal half = unit * 0.26;
+            for (int i = -1; i <= 1; ++i) {
+                const qreal y = c.y() + i * unit * 0.2;
+                p.drawLine(QPointF(c.x() - half, y), QPointF(c.x() + half, y));
+            }
+        } else {
+            p.setPen(QPen(Dark, unit * 0.1, Qt::SolidLine, Qt::RoundCap));
+            const QPointF base(c.x(), c.y() + unit * 0.3);
+            const qreal len = unit * 0.56;
+            for (const qreal degrees : {-48.0, 0.0, 48.0}) {
+                const qreal r = degrees * 3.14159265358979 / 180.0;
+                const QPointF dir(std::sin(r), -std::cos(r));
+                p.drawLine(base + dir * (len * 0.5), base + dir * len);
+            }
+        }
+        break;
+    }
     case Look::Keep:
         break;
     }
@@ -638,7 +664,6 @@ Plan PlanForDualSense() {
     });
 }
 
-constexpr const char* KbmProfileName = "Pokopia keyboard and mouse";
 const QString KbmProfileResource = QStringLiteral(":/pikantine/kbm_profile.ini");
 
 /// The keyboard and mouse profile shipped inside Eglantine, read as Player 1's settings.
@@ -718,20 +743,7 @@ std::vector<PG::Export> IconModExports(InputCommon::InputSubsystem* input) {
 } // namespace
 
 void InstallPokopiaProfiles() {
-    // The keyboard and mouse profile, so it is in Controls -> Profile from the start. A copy you
-    // have edited is kept.
-    const QString dir = QString::fromStdString(Common::FS::PathToUTF8String(
-        Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "input"));
-    const QString file =
-        QDir(dir).filePath(QString::fromUtf8(KbmProfileName) + QStringLiteral(".ini"));
-    if (QFile::exists(file)) {
-        return;
-    }
-    QDir().mkpath(dir);
-    if (QFile::copy(KbmProfileResource, file)) {
-        QFile::setPermissions(file, QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser |
-                                        QFile::WriteUser);
-    }
+    PokopiaControls::InstallProfiles();
 }
 
 void SetPokopiaGlyphPlan(InputCommon::InputSubsystem* input, bool pokopia) {

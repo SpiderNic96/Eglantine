@@ -868,6 +868,9 @@ struct Values {
     // Pikantine: Pokopia's button prompts: 1 drawn from Player 1's controls
     // (yuzu/pokopia_glyph_plan), 0 the game's own (or an icon mod's).
     Setting<u8, true> pokopia_icons{linkage, 1, 0, 1, "pokopia_icons", Category::Miscellaneous};
+    // Pikantine: on the DualSense, Cross confirms and Circle goes back (A and B binds swapped).
+    Setting<bool> pokopia_swap_confirm{linkage, false, "pokopia_swap_confirm",
+                                       Category::Miscellaneous};
 
     Setting<bool> mouse_panning{
                                 linkage, false, "mouse_panning", Category::Controls, Specialization::Default, false};

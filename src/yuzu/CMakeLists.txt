@@ -234,6 +234,7 @@ add_executable(yuzu
     yuzu.rc
     migration_dialog.h migration_dialog.cpp
     nup_dialogs.h nup_dialogs.cpp
+    pokopia_controls.h pokopia_controls.cpp
     pokopia_glyph_plan.h pokopia_glyph_plan.cpp
     migration_worker.h migration_worker.cpp
     libqt_common.h libqt_common.cpp

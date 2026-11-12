@@ -39,7 +39,7 @@ private:
     void SetConfiguration();
     void UpdateControlsNote();
     /// Switches the button-icon add-ons and Player 1's controls; returns what it did.
-    QString SwitchControls(int controls);
+    QString SwitchControls(int controls, bool swap);
 
     Core::System& system;
     InputCommon::InputSubsystem* input_subsystem{};
@@ -49,5 +49,6 @@ private:
     QLabel* pokemon_cap_note{};
     QComboBox* controls{};
     QComboBox* icons{};
+    QCheckBox* swap_confirm{};
     QLabel* controls_note{};
 };
