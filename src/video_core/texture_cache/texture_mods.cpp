@@ -69,6 +69,28 @@ std::string Key(u64 hash, u32 width, u32 height) {
     return fmt::format("{:016x}_{}x{}", hash, width, height);
 }
 
+/// Pikantine's two Pokopia icon mods: neither when the prompts are drawn from the controls, else
+/// the one matching Settings -> Pikantine's controls (both, as the add-on list has them, when no
+/// controls are chosen). Any other mod is always wanted.
+bool PokopiaIconModWanted(const std::string& mod) {
+    const bool kbm = mod == "Keyboard and mouse glyphs";
+    const bool ps = mod == "PlayStation glyphs";
+    if (!kbm && !ps) {
+        return true;
+    }
+    if (Settings::values.pokopia_icons.GetValue() == 1) {
+        return false;
+    }
+    switch (Settings::values.pokopia_controls.GetValue()) {
+    case 1:
+        return kbm;
+    case 2:
+        return ps;
+    default:
+        return true;
+    }
+}
+
 void Load(State& s) {
     if (s.loaded) {
         return;
@@ -103,6 +125,9 @@ void Load(State& s) {
             const std::string mod_name = mod.path().filename().string();
             if (disabled != nullptr &&
                 std::find(disabled->begin(), disabled->end(), mod_name) != disabled->end()) {
+                continue;
+            }
+            if (title_id == 0x0400A3A01EE4C000ULL && !PokopiaIconModWanted(mod_name)) {
                 continue;
             }
             const fs::path textures = mod.path() / "textures";
@@ -210,6 +235,13 @@ void OnUpload(const ImageInfo& info, std::span<const u8> guest, std::span<u8> ho
         PokopiaGlyphs::Apply(hash, info.size.width, info.size.height,
                              host.subspan(level0.buffer_offset, level0.buffer_size), row_bytes);
     };
+    // The icon mods Pikantine makes from this copy of the game, from the texture as it is.
+    if (!copies.empty() && info.size.width == PokopiaGlyphs::TextureSize) {
+        PokopiaGlyphs::WriteExports(hash, info.size.width, info.size.height,
+                                    host.first(host_size), copies[0].buffer_offset,
+                                    copies[0].buffer_size,
+                                    static_cast<std::size_t>(copies[0].buffer_row_length / 4) * 16);
+    }
     const auto it = s.replacements.find(Key(hash, info.size.width, info.size.height));
     if (it == s.replacements.end()) {
         glyphs();

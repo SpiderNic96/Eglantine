@@ -14,6 +14,13 @@ namespace Pikantine {
 /// Buttons bound to anything else keep the game's own Switch glyph. Call before a game starts;
 /// with `pokopia` false, or Settings -> Pikantine -> Button icons set to the game's own, it
 /// clears the tiles.
+/// Also has the renderer write the "Keyboard and mouse glyphs" and "PlayStation glyphs" icon
+/// mods into the game's mod folder, from this copy of the game, the first time its textures load
+/// (which one loads follows Settings -> Pikantine, see texture_mods.cpp).
 void SetPokopiaGlyphPlan(InputCommon::InputSubsystem* input, bool pokopia);
+
+/// Puts the "Pokopia keyboard and mouse" input profile (shipped inside Eglantine) in the input
+/// profile folder if it is not there. Called as Eglantine opens.
+void InstallPokopiaProfiles();
 
 } // namespace Pikantine

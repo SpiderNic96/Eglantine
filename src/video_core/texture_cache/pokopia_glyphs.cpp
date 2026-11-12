@@ -4,13 +4,16 @@
 #include "video_core/texture_cache/pokopia_glyphs.h"
 
 #include <algorithm>
+#include <fstream>
 #include <mutex>
 #include <utility>
 
 #include <bc7enc.h>
+#include <fmt/format.h>
 #include <bc_decoder.h>
 
 #include "common/logging.h"
+#include "common/fs/path_util.h"
 
 namespace VideoCommon::PokopiaGlyphs {
 
@@ -22,6 +25,7 @@ struct Plan {
     std::mutex mutex;
     std::vector<Tile> atlas;
     std::vector<Tile> title;
+    std::vector<Export> exports;
 };
 
 Plan& P() {
@@ -137,7 +141,43 @@ void SetPlan(std::vector<Tile> atlas, std::vector<Tile> title) {
 bool HasPlan() {
     Plan& p = P();
     std::scoped_lock lock{p.mutex};
-    return !p.atlas.empty() || !p.title.empty();
+    return !p.atlas.empty() || !p.title.empty() || !p.exports.empty();
+}
+
+void SetExports(std::vector<Export> exports) {
+    Plan& p = P();
+    std::scoped_lock lock{p.mutex};
+    p.exports = std::move(exports);
+}
+
+void WriteExports(u64 hash, u32 width, u32 height, std::span<const u8> host,
+                  std::size_t level0_offset, std::size_t level0_size, std::size_t row_bytes) {
+    if ((hash != AtlasHash && hash != TitleHash) || width != TextureSize ||
+        height != TextureSize || level0_offset + level0_size > host.size() ||
+        row_bytes * (TextureSize / 4) > level0_size) {
+        return;
+    }
+    Plan& p = P();
+    std::scoped_lock lock{p.mutex};
+    const std::string name = fmt::format("{:016x}_{}x{}.bin", hash, width, height);
+    for (const Export& e : p.exports) {
+        const auto& tiles = hash == AtlasHash ? e.atlas : e.title;
+        std::error_code ec;
+        const std::filesystem::path file = e.folder / name;
+        if (std::filesystem::exists(file, ec)) {
+            continue;
+        }
+        std::vector<u8> copy(host.begin(), host.end());
+        const std::span<u8> level0 = std::span<u8>(copy).subspan(level0_offset, level0_size);
+        for (const Tile& tile : tiles) {
+            Put(level0, row_bytes, static_cast<int>(TextureSize), tile);
+        }
+        std::filesystem::create_directories(e.folder, ec);
+        std::ofstream out(file, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(copy.data()),
+                  static_cast<std::streamsize>(copy.size()));
+        LOG_INFO(HW_GPU, "Pokopia icon mod written: {}", Common::FS::PathToUTF8String(file));
+    }
 }
 
 bool Apply(u64 hash, u32 width, u32 height, std::span<u8> host, std::size_t row_bytes) {

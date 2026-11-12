@@ -73,6 +73,7 @@ constexpr const char* KbmIcons = "Keyboard and mouse glyphs";
 constexpr const char* PsIcons = "PlayStation glyphs";
 constexpr const char* PsIconsRomfs = "Botoes PlayStation";
 constexpr const char* KbmProfile = "Pokopia keyboard and mouse";
+constexpr const char* DualSenseProfile = "Pokopia DualSense";
 
 enum Controls : int { NotChosen = 0, KeyboardMouse = 1, DualSense = 2 };
 
@@ -229,8 +230,8 @@ void ConfigurePikantine::UpdateControlsNote() {
             return tr("<b>%1</b> is one folder too deep, inside <b>%2</b>: move it up into %3")
                 .arg(QString::fromUtf8(name), nested, folder);
         }
-        return tr("<b>%1</b> is not installed: its folder goes in %2 (the game keeps its Switch "
-                  "icons until then)")
+        return tr("<b>%1</b> is made the first time Pokopia starts (in %2), from your own copy "
+                  "of the game")
             .arg(QString::fromUtf8(name), folder);
     };
     switch (controls->currentData().toInt()) {
@@ -260,12 +261,14 @@ void ConfigurePikantine::UpdateControlsNote() {
 
 QString ConfigurePikantine::SwitchControls(int choice) {
     QStringList done;
-    // Icons: only one set of button icons at a time, and none when they are drawn from the
-    // controls (a RomFS icon mod would change the texture they are drawn into).
+    bool mapped_pad = false;
+    // Icons: the renderer loads whichever of Pikantine's two icon mods these settings want
+    // (texture_mods.cpp), so both stay on in the add-on list. A RomFS icon mod changes the
+    // texture the prompts are drawn into, so it is only on for the DualSense without our own.
     const bool ps = choice == DualSense;
     const bool drawn = icons->currentData().toInt() == 1;
-    SetAddon(KbmIcons, !drawn && !ps);
-    SetAddon(PsIcons, !drawn && ps);
+    SetAddon(KbmIcons, true);
+    SetAddon(PsIcons, true);
     SetAddon(PsIconsRomfs, !drawn && ps && !ModInstalled(PsIcons));
 
     auto* p1 = system.HIDCore().GetEmulatedController(Core::HID::NpadIdType::Player1);
@@ -326,6 +329,7 @@ QString ConfigurePikantine::SwitchControls(int choice) {
             player.controller_type = Settings::ControllerType::ProController;
             player.connected = true;
             player.profile_name.clear();
+            mapped_pad = true;
             done << tr("Player 1 is now a Pro Controller on %1.")
                         .arg(QString::fromStdString(pad.Get("display", "your controller")));
         }
@@ -336,6 +340,14 @@ QString ConfigurePikantine::SwitchControls(int choice) {
     p1->DisableConfiguration();
     p1->SaveCurrentConfig();
     p1->EnableConfiguration();
+    if (mapped_pad) {
+        // Kept as an input profile too, to load again from Controls -> Profile.
+        InputProfiles profiles;
+        if (profiles.CreateProfile(DualSenseProfile, 0) ||
+            profiles.SaveProfile(DualSenseProfile, 0)) {
+            done << tr("Saved as the \"%1\" input profile.").arg(QString::fromUtf8(DualSenseProfile));
+        }
+    }
     return done.join(QLatin1Char(' '));
 }
 
@@ -351,9 +363,7 @@ void ConfigurePikantine::ApplyConfiguration() {
     }
     const int drawn = icons->currentData().toInt();
     if (drawn == 1 && Settings::values.pokopia_icons.GetValue() != 1) {
-        for (const char* name : {KbmIcons, PsIcons, PsIconsRomfs}) {
-            SetAddon(name, false);
-        }
+        SetAddon(PsIconsRomfs, false);
     }
     Settings::values.pokopia_controls = static_cast<u8>(choice);
     Settings::values.pokopia_icons = static_cast<u8>(drawn);

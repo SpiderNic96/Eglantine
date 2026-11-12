@@ -114,7 +114,7 @@ Settings → Pikantine → **Controls and button icons** → **Play Pokopia with
 
 The setting switches Player 1 at once. **Button icons** (same box) is "Drawn from Player 1's controls" by default. When the game starts, Eglantine draws each prompt from whatever that button is bound to: a key, a mouse button, or a DualSense button by where it sits. Rebind a button and its prompt follows from the next game start. Buttons on other pads keep the Switch icons. No icon mod is needed. Choosing it switches the icon add-ons off, because a RomFS icon mod would stop the drawing. The title screen's "PRESS (A) BUTTON" follows A's bind too.
 
-Set it to "The game's own, or an icon mod" to use texture mods instead. [`tools/texture_mods/pokopia_kbm_glyphs.py`](tools/texture_mods/pokopia_kbm_glyphs.py) makes both sets from your own texture dump (add `--style ps` for PlayStation). Install them as `Keyboard and mouse glyphs` and `PlayStation glyphs`, and the controls choice turns on the matching one.
+Set it to "The game's own, or an icon mod" to use the icon mods instead. The build makes both itself the first time Pokopia starts, from your own copy of the game, in the game's mod folder: `Keyboard and mouse glyphs` with the keyboard profile's keys, and `PlayStation glyphs` with a DualSense's buttons. Eglantine loads the one that matches the controls you picked. The input profiles come with the build too. **Pokopia keyboard and mouse** is in Controls → Profile from the first start. **Pokopia DualSense** is saved the first time you pick the DualSense with it connected. [`tools/texture_mods/pokopia_kbm_glyphs.py`](tools/texture_mods/pokopia_kbm_glyphs.py) still makes the same mods from a texture dump (`--style ps` for PlayStation).
 
 ### Switches
 

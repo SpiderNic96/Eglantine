@@ -6,18 +6,23 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include <QDir>
+#include <QFile>
 #include <QFont>
 #include <QFontMetricsF>
 #include <QImage>
 #include <QKeySequence>
 #include <QPainter>
 #include <QPainterPath>
+#include <QSettings>
 #include <QString>
 
+#include "common/fs/path_util.h"
 #include "common/param_package.h"
 #include "common/settings.h"
 #include "common/settings_input.h"
@@ -582,8 +587,161 @@ int ButtonOf(const char* name) {
 
 } // namespace
 
+namespace {
+
+struct Plan {
+    std::vector<PG::Tile> atlas;
+    std::vector<PG::Tile> title;
+};
+
+/// The tiles for every glyph, given what each box should show.
+template <typename LookOf>
+Plan BuildPlan(LookOf look_of) {
+    Plan plan;
+    for (const auto& box : PG::AtlasBoxes) {
+        const Look look = look_of(box);
+        const QImage img = Draw(look, box.x1 - box.x0, box.y1 - box.y0);
+        if (img.isNull()) {
+            continue;
+        }
+        plan.atlas.push_back(
+            ToTile(img, box.x0, box.y0, {box.x0 - 2, box.y0 - 2, box.x1 + 2, box.y1 + 2}));
+        if (std::strcmp(box.name, "A") == 0) {
+            if (auto t = TitleTile(look)) {
+                plan.title.push_back(std::move(*t));
+            }
+        }
+    }
+    return plan;
+}
+
+Plan PlanForPlayer(InputCommon::InputSubsystem* input, const Settings::PlayerInput& player) {
+    return BuildPlan([&](const PG::Box& box) {
+        if (std::strcmp(box.name, "LStick") == 0) {
+            return StickLook(player, Settings::NativeAnalog::LStick);
+        }
+        if (std::strcmp(box.name, "RStick") == 0) {
+            return StickLook(player, Settings::NativeAnalog::RStick);
+        }
+        if (const int button = ButtonOf(box.name); button >= 0) {
+            return ButtonLook(input, player, button);
+        }
+        return Look{};
+    });
+}
+
+/// A DualSense with its default binds: every button where it sits.
+Plan PlanForDualSense() {
+    return BuildPlan([](const PG::Box& box) {
+        const int button = ButtonOf(box.name);
+        return button >= 0 ? PlayStationLook(button, button) : Look{};
+    });
+}
+
+constexpr const char* KbmProfileName = "Pokopia keyboard and mouse";
+const QString KbmProfileResource = QStringLiteral(":/pikantine/kbm_profile.ini");
+
+/// The keyboard and mouse profile shipped inside Eglantine, read as Player 1's settings.
+Settings::PlayerInput KbmProfilePlayer() {
+    Settings::PlayerInput player{};
+    QSettings ini(KbmProfileResource, QSettings::IniFormat);
+    ini.beginGroup(QStringLiteral("Controls"));
+    for (int i = 0; i < Settings::NativeButton::NumButtons; ++i) {
+        player.buttons[i] =
+            ini.value(QString::fromUtf8(Settings::NativeButton::mapping[i])).toString().toStdString();
+    }
+    for (int i = 0; i < Settings::NativeAnalog::NumAnalogs; ++i) {
+        player.analogs[i] =
+            ini.value(QString::fromUtf8(Settings::NativeAnalog::mapping[i])).toString().toStdString();
+    }
+    player.connected = true;
+    return player;
+}
+
+QString PokopiaModFolder() {
+    return QString::fromStdString(Common::FS::PathToUTF8String(
+        Common::FS::GetEdenPath(Common::FS::EdenPath::LoadDir) / "0400A3A01EE4C000"));
+}
+
+bool HasTextures(const QString& mod) {
+    const QDir textures(QDir(PokopiaModFolder()).filePath(mod + QStringLiteral("/textures")));
+    return textures.exists(QStringLiteral("abafc68a5cb224c9_1024x1024.bin")) &&
+           textures.exists(QStringLiteral("eef4c6cb94636c58_1024x1024.bin"));
+}
+
+void WriteReadme(const QString& mod, const QString& text) {
+    const QString dir = QDir(PokopiaModFolder()).filePath(mod);
+    QDir().mkpath(dir);
+    QFile f(QDir(dir).filePath(QStringLiteral("README.txt")));
+    if (!f.exists() && f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        f.write(text.toUtf8());
+    }
+}
+
+/// The two icon mods, made from this copy of the game's own textures the first time they load.
+std::vector<PG::Export> IconModExports(InputCommon::InputSubsystem* input) {
+    std::vector<PG::Export> out;
+    // Which of the two the renderer loads follows Settings -> Pikantine (texture_mods.cpp).
+    const auto add = [&](const char* name, Plan plan, const QString& readme) {
+        const QString mod = QString::fromUtf8(name);
+        if (HasTextures(mod)) {
+            return;
+        }
+        WriteReadme(mod, readme);
+        PG::Export e;
+        e.folder = std::filesystem::path(
+            QDir(PokopiaModFolder()).filePath(mod + QStringLiteral("/textures")).toStdU16String());
+        e.atlas = std::move(plan.atlas);
+        e.title = std::move(plan.title);
+        out.push_back(std::move(e));
+    };
+    add("Keyboard and mouse glyphs", PlanForPlayer(input, KbmProfilePlayer()),
+        QStringLiteral(
+            "Pokopia keyboard and mouse glyphs, made by Eglantine (Pikantine) from your own copy "
+            "of the game the first time it started.\n\nThe prompts show the \"Pokopia keyboard "
+            "and mouse\" profile's keys: A=E B=Shift X=Tab Y=F L=Q R=Space ZL=right click "
+            "ZR=left click +=M -=C D-pad=1/2/3/4, sticks WASD and the mouse, stick clicks "
+            "Ctrl/V.\nSettings -> Pikantine -> Controls and button icons picks which icon set "
+            "is on. Delete this folder and Eglantine makes it again.\nMade from your own game's "
+            "textures: do not share.\n"));
+    add("PlayStation glyphs", PlanForDualSense(),
+        QStringLiteral(
+            "Pokopia PlayStation glyphs, made by Eglantine (Pikantine) from your own copy of the "
+            "game the first time it started.\n\nA DualSense by position: A=Circle B=Cross "
+            "X=Triangle Y=Square L/R=L1/R1 ZL/ZR=L2/R2 +=Options -=Create stick clicks=L3/R3.\n"
+            "Settings -> Pikantine -> Controls and button icons picks which icon set is on. "
+            "Delete this folder and Eglantine makes it again.\nMade from your own game's "
+            "textures: do not share.\n"));
+    return out;
+}
+
+} // namespace
+
+void InstallPokopiaProfiles() {
+    // The keyboard and mouse profile, so it is in Controls -> Profile from the start. A copy you
+    // have edited is kept.
+    const QString dir = QString::fromStdString(Common::FS::PathToUTF8String(
+        Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "input"));
+    const QString file =
+        QDir(dir).filePath(QString::fromUtf8(KbmProfileName) + QStringLiteral(".ini"));
+    if (QFile::exists(file)) {
+        return;
+    }
+    QDir().mkpath(dir);
+    if (QFile::copy(KbmProfileResource, file)) {
+        QFile::setPermissions(file, QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser |
+                                        QFile::WriteUser);
+    }
+}
+
 void SetPokopiaGlyphPlan(InputCommon::InputSubsystem* input, bool pokopia) {
-    if (!pokopia || Settings::values.pokopia_icons.GetValue() == 0) {
+    if (!pokopia) {
+        PG::SetPlan({}, {});
+        PG::SetExports({});
+        return;
+    }
+    PG::SetExports(IconModExports(input));
+    if (Settings::values.pokopia_icons.GetValue() == 0) {
         PG::SetPlan({}, {});
         return;
     }
@@ -592,31 +750,8 @@ void SetPokopiaGlyphPlan(InputCommon::InputSubsystem* input, bool pokopia) {
     const Settings::PlayerInput& player = players[0].connected || !players[8].connected
                                               ? players[0]
                                               : players[8];
-    std::vector<PG::Tile> atlas;
-    std::vector<PG::Tile> title;
-    for (const auto& box : PG::AtlasBoxes) {
-        const int w = box.x1 - box.x0, h = box.y1 - box.y0;
-        Look look;
-        if (std::strcmp(box.name, "LStick") == 0) {
-            look = StickLook(player, Settings::NativeAnalog::LStick);
-        } else if (std::strcmp(box.name, "RStick") == 0) {
-            look = StickLook(player, Settings::NativeAnalog::RStick);
-        } else if (const int button = ButtonOf(box.name); button >= 0) {
-            look = ButtonLook(input, player, button);
-        }
-        const QImage img = Draw(look, w, h);
-        if (img.isNull()) {
-            continue;
-        }
-        atlas.push_back(
-            ToTile(img, box.x0, box.y0, {box.x0 - 2, box.y0 - 2, box.x1 + 2, box.y1 + 2}));
-        if (std::strcmp(box.name, "A") == 0) {
-            if (auto t = TitleTile(look)) {
-                title.push_back(std::move(*t));
-            }
-        }
-    }
-    PG::SetPlan(std::move(atlas), std::move(title));
+    Plan plan = PlanForPlayer(input, player);
+    PG::SetPlan(std::move(plan.atlas), std::move(plan.title));
 }
 
 } // namespace Pikantine

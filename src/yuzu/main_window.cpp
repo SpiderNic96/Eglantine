@@ -431,6 +431,9 @@ MainWindow::MainWindow(bool has_broken_vulkan)
 
     play_time_manager = std::make_unique<PlayTime::PlayTimeManager>();
 
+    // Pikantine: the Pokopia keyboard and mouse profile, ready under Controls -> Profile.
+    Pikantine::InstallPokopiaProfiles();
+
     InitializeWidgets();
     InitializeDebugWidgets();
     InitializeRecentFileMenuActions();

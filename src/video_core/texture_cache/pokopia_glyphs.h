@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <filesystem>
 #include <span>
 #include <vector>
 
@@ -69,8 +70,24 @@ struct Tile {
 /// alone). Called by the frontend before a game starts; takes effect at the next upload.
 void SetPlan(std::vector<Tile> atlas, std::vector<Tile> title);
 
-/// True when there are tiles to apply.
+/// True when there are tiles to apply or icon mods to write.
 bool HasPlan();
+
+/// An icon mod to make from this copy of the game: the textures with these tiles, written to
+/// `folder` as <hash>_1024x1024.bin (the texture-mod layout, texture_mods.h) if not there yet.
+struct Export {
+    std::filesystem::path folder;
+    std::vector<Tile> atlas;
+    std::vector<Tile> title;
+};
+
+/// Sets the icon mods to write when the textures next load (the frontend, before a game starts).
+void SetExports(std::vector<Export> exports);
+
+/// Writes the icon mods for `hash` from `host` (all of the texture as uploaded, before any
+/// replacement); level 0 is `level0` within it, `row_bytes` a row of its blocks.
+void WriteExports(u64 hash, u32 width, u32 height, std::span<const u8> host,
+                  std::size_t level0_offset, std::size_t level0_size, std::size_t row_bytes);
 
 /// Applies the tiles to `host` (the texture as uploaded: BC7 blocks, `row_bytes` a row of blocks)
 /// when `hash` is the atlas or the title. Returns true when it changed anything.
