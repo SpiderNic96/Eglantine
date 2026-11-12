@@ -229,8 +229,22 @@ Look ButtonLook(InputCommon::InputSubsystem* input, const Settings::PlayerInput&
         if (!device || !IsPlayStation(*device)) {
             return {}; // other pads keep the Switch glyphs
         }
-        for (const auto& [native, defaults] : input->GetButtonMappingForDevice(*device)) {
-            if (SameInput(param, defaults)) {
+        // Which physical button it is: the Switch button that is on it by default. The default
+        // mapping also puts SL/SR on the shoulders, so only the main buttons are asked, the
+        // button's own first.
+        const auto defaults = input->GetButtonMappingForDevice(*device);
+        using namespace Settings::NativeButton;
+        static constexpr int order[] = {A,     B,  X,  Y,     L,      R,      ZL,   ZR,    Plus,
+                                        Minus, LStick, RStick, DUp, DDown, DLeft, DRight, Home};
+        const auto matches = [&](int native) {
+            const auto it = defaults.find(static_cast<Values>(native));
+            return it != defaults.end() && SameInput(param, it->second);
+        };
+        if (matches(button)) {
+            return PlayStationLook(button, button);
+        }
+        for (const int native : order) {
+            if (matches(native)) {
                 return PlayStationLook(native, button);
             }
         }
