@@ -39,3 +39,8 @@ on Windows, `~/.local/share/eglantine/load` on Linux. Restart the game; the log 
 
 `python -I texture_mod_tool.py icons <prompt_icons.pak> <folder>` extracts the keyboard and mouse
 icons of Recompia's prompt pack (Kenney Input Prompts, CC0) for button-glyph mods.
+
+`python -I pokopia_kbm_glyphs.py <dump folder> <out folder> [--style ps]` redraws Pokopia's button
+prompts as keys and mouse buttons, or with `--style ps` as DualSense buttons. Pack its two PNGs into
+`Keyboard and mouse glyphs` or `PlayStation glyphs`: Settings → Pikantine → Controls turns on the
+one that matches your controls.

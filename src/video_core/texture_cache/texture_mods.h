@@ -22,6 +22,10 @@ namespace VideoCommon::TextureMods {
 /// texture's host data when it is uploaded; its size must match the dump's.
 bool Active();
 
+/// Forgets the mods read so far; the next upload reads them again (with the add-ons switched off
+/// in the game's Properties left out). The texture cache calls it as each game starts.
+void Reset();
+
 /// After a tiled texture was untiled into `host` (`copies` from UnswizzleImage): dumps it, and
 /// overwrites `host` with a replacement when one matches. `guest` is the tiled guest data.
 void OnUpload(const ImageInfo& info, std::span<const u8> guest, std::span<u8> host,

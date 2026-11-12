@@ -3,22 +3,35 @@
 
 #include "yuzu/configuration/configure_pikantine.h"
 
+#include <algorithm>
 #include <cstdlib>
+#include <string>
+#include <vector>
 
 #include <QCheckBox>
+#include <QComboBox>
+#include <QDir>
+#include <QFile>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
 #include <fmt/format.h>
 
+#include "common/fs/path_util.h"
+#include "common/param_package.h"
 #include "common/settings.h"
 #include "common/string_util.h"
 #include "core/core.h"
 #include "core/hle/service/acc/profile_manager.h"
+#include "hid_core/frontend/emulated_controller.h"
+#include "hid_core/hid_core.h"
+#include "input_common/main.h"
+#include "yuzu/configuration/input_profiles.h"
 #include "yuzu/configuration/pokopia_dex_dialog.h"
 
 namespace {
@@ -52,9 +65,39 @@ QVector<PokopiaProfile> Profiles(const Core::System& system) {
     return out;
 }
 
+constexpr u64 PokopiaId = 0x0400A3A01EE4C000;
+// The add-on folders under <load>/0400A3A01EE4C000 that hold button icons. The first two are
+// Pikantine's texture mods (tools/texture_mods/pokopia_kbm_glyphs.py); "Botoes PlayStation" is a
+// RomFS mod some players use for the same thing.
+constexpr const char* KbmIcons = "Keyboard and mouse glyphs";
+constexpr const char* PsIcons = "PlayStation glyphs";
+constexpr const char* PsIconsRomfs = "Botoes PlayStation";
+constexpr const char* KbmProfile = "Pokopia keyboard and mouse";
+
+enum Controls : int { NotChosen = 0, KeyboardMouse = 1, DualSense = 2 };
+
+QString ModFolder() {
+    return QString::fromStdString(Common::FS::PathToUTF8String(
+        Common::FS::GetEdenPath(Common::FS::EdenPath::LoadDir) / "0400A3A01EE4C000"));
+}
+
+bool ModInstalled(const char* name) {
+    return QDir(ModFolder()).exists(QString::fromUtf8(name));
+}
+
+void SetAddon(const char* name, bool on) {
+    auto& disabled = Settings::values.disabled_addons[PokopiaId];
+    const auto it = std::find(disabled.begin(), disabled.end(), std::string(name));
+    if (on && it != disabled.end()) {
+        disabled.erase(it);
+    } else if (!on && it == disabled.end()) {
+        disabled.emplace_back(name);
+    }
+}
+
 } // namespace
 
-ConfigurePikantine::ConfigurePikantine(const Core::System& system_, QWidget* parent)
+ConfigurePikantine::ConfigurePikantine(Core::System& system_, QWidget* parent)
     : QWidget(parent), system{system_} {
     setAccessibleName(tr("Pikantine"));
     auto* layout = new QVBoxLayout(this);
@@ -96,6 +139,20 @@ ConfigurePikantine::ConfigurePikantine(const Core::System& system_, QWidget* par
     }
     layout->addWidget(cap_box);
 
+    auto* controls_box = new QGroupBox(tr("Controls and button icons"), this);
+    auto* controls_layout = new QFormLayout(controls_box);
+    controls = new QComboBox(controls_box);
+    controls->addItem(tr("Leave my controls as they are"), NotChosen);
+    controls->addItem(tr("Keyboard and mouse"), KeyboardMouse);
+    controls->addItem(tr("DualSense (as a Pro Controller)"), DualSense);
+    controls_layout->addRow(tr("Play Pokopia with"), controls);
+    controls_note = new QLabel(controls_box);
+    controls_note->setWordWrap(true);
+    controls_layout->addRow(controls_note);
+    connect(controls, &QComboBox::currentIndexChanged, this,
+            &ConfigurePikantine::UpdateControlsNote);
+    layout->addWidget(controls_box);
+
     auto* dex_box = new QGroupBox(tr("Save editor"), this);
     auto* dex_layout = new QVBoxLayout(dex_box);
     auto* dex_note = new QLabel(
@@ -120,12 +177,137 @@ ConfigurePikantine::ConfigurePikantine(const Core::System& system_, QWidget* par
 
 ConfigurePikantine::~ConfigurePikantine() = default;
 
+void ConfigurePikantine::SetInputSubsystem(InputCommon::InputSubsystem* input_subsystem_) {
+    input_subsystem = input_subsystem_;
+}
+
 void ConfigurePikantine::SetConfiguration() {
     minimap->setChecked(Settings::values.pokopia_minimap.GetValue());
     pokemon_cap->setValue(Settings::values.pokopia_pokemon_cap.GetValue());
+    controls->setCurrentIndex(
+        std::max(0, controls->findData(static_cast<int>(Settings::values.pokopia_controls.GetValue()))));
+    UpdateControlsNote();
+}
+
+void ConfigurePikantine::UpdateControlsNote() {
+    const auto mod = [](const char* name) {
+        return ModInstalled(name) ? tr("<b>%1</b> is installed").arg(QString::fromUtf8(name))
+                                  : tr("<b>%1</b> is not installed (the game keeps its Switch "
+                                       "icons)")
+                                        .arg(QString::fromUtf8(name));
+    };
+    switch (controls->currentData().toInt()) {
+    case KeyboardMouse:
+        controls_note->setText(
+            tr("Player 1 gets the <b>%1</b> profile: keyboard only, as Dual Joycons, so the "
+               "Joy-Con mouse mode (middle click) still works. Prompts show keys and mouse "
+               "buttons. %2.")
+                .arg(QString::fromUtf8(KbmProfile), mod(KbmIcons)));
+        break;
+    case DualSense:
+        controls_note->setText(
+            tr("Player 1 becomes a Pro Controller on your DualSense, mapped by position (Cross "
+               "is B, Circle is A). Connect it before pressing OK. Prompts show PlayStation "
+               "buttons. %1.")
+                .arg(ModInstalled(PsIcons) || !ModInstalled(PsIconsRomfs) ? mod(PsIcons)
+                                                                            : mod(PsIconsRomfs)));
+        break;
+    default:
+        controls_note->setText(tr("Pick one to set up Player 1 and switch the prompts' button "
+                                  "icons to match. The icon mods go in %1.")
+                                   .arg(QDir::toNativeSeparators(ModFolder())));
+        break;
+    }
+}
+
+QString ConfigurePikantine::SwitchControls(int choice) {
+    QStringList done;
+    // Icons: only one set of button icons at a time.
+    const bool ps = choice == DualSense;
+    SetAddon(KbmIcons, !ps);
+    SetAddon(PsIcons, ps);
+    SetAddon(PsIconsRomfs, ps && !ModInstalled(PsIcons));
+
+    auto* p1 = system.HIDCore().GetEmulatedController(Core::HID::NpadIdType::Player1);
+    if (choice == KeyboardMouse) {
+        // The profile ships inside Eglantine; a copy you have edited is kept.
+        const QString dir = QString::fromStdString(Common::FS::PathToUTF8String(
+            Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) / "input"));
+        const QString file = QDir(dir).filePath(QString::fromUtf8(KbmProfile) +
+                                                QStringLiteral(".ini"));
+        if (!QFile::exists(file)) {
+            QDir().mkpath(dir);
+            QFile::copy(QStringLiteral(":/pikantine/kbm_profile.ini"), file);
+            QFile::setPermissions(file, QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser |
+                                            QFile::WriteUser);
+        }
+        InputProfiles profiles;
+        if (profiles.LoadProfile(KbmProfile, 0)) {
+            done << tr("Player 1 now uses the \"%1\" profile.").arg(QString::fromUtf8(KbmProfile));
+        } else {
+            done << tr("Could not load the \"%1\" profile; Player 1 is unchanged.")
+                        .arg(QString::fromUtf8(KbmProfile));
+        }
+    } else if (choice == DualSense) {
+        Common::ParamPackage pad;
+        if (input_subsystem != nullptr) {
+            for (const auto& device : input_subsystem->GetInputDevices()) {
+                if (device.Get("engine", "") != "sdl") {
+                    continue;
+                }
+                const std::string name = device.Get("display", "");
+                const bool dualsense = name.find("DualSense") != std::string::npos ||
+                                       name.find("PS5") != std::string::npos;
+                if (dualsense || !pad.Has("engine")) {
+                    pad = device;
+                }
+                if (dualsense) {
+                    break;
+                }
+            }
+        }
+        if (!pad.Has("engine")) {
+            done << tr("No controller found, so Player 1 is unchanged: connect your DualSense, "
+                       "then pick Keyboard and mouse and DualSense again.");
+        } else {
+            auto& player = Settings::values.players.GetValue()[0];
+            player.buttons = {};
+            player.analogs = {};
+            player.motions = {};
+            for (const auto& [index, param] : input_subsystem->GetButtonMappingForDevice(pad)) {
+                player.buttons[index] = param.Serialize();
+            }
+            for (const auto& [index, param] : input_subsystem->GetAnalogMappingForDevice(pad)) {
+                player.analogs[index] = param.Serialize();
+            }
+            for (const auto& [index, param] : input_subsystem->GetMotionMappingForDevice(pad)) {
+                player.motions[index] = param.Serialize();
+            }
+            player.controller_type = Settings::ControllerType::ProController;
+            player.connected = true;
+            player.profile_name.clear();
+            done << tr("Player 1 is now a Pro Controller on %1.")
+                        .arg(QString::fromStdString(pad.Get("display", "your controller")));
+        }
+    }
+    // The controller reads its bindings back, as the Controls page does after loading a
+    // profile, then keeps them the way that page's Apply does.
+    p1->ReloadFromSettings();
+    p1->DisableConfiguration();
+    p1->SaveCurrentConfig();
+    p1->EnableConfiguration();
+    return done.join(QLatin1Char(' '));
 }
 
 void ConfigurePikantine::ApplyConfiguration() {
     Settings::values.pokopia_minimap = minimap->isChecked();
     Settings::values.pokopia_pokemon_cap = static_cast<u8>(pokemon_cap->value());
+    const int choice = controls->currentData().toInt();
+    if (choice != NotChosen && choice != Settings::values.pokopia_controls.GetValue()) {
+        const QString done = SwitchControls(choice);
+        QMessageBox::information(
+            this, tr("Pikantine"),
+            tr("%1\n\nThe button icons switch the next time Pokopia starts.").arg(done));
+    }
+    Settings::values.pokopia_controls = static_cast<u8>(choice);
 }

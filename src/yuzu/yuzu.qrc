@@ -7,4 +7,7 @@ SPDX-License-Identifier: GPL-2.0-or-later
     <qresource prefix="/img">
         <file alias="eglantine.ico">../../dist/eden.ico</file>
     </qresource>
+    <qresource prefix="/pikantine">
+        <file alias="kbm_profile.ini">../../mods/Pokemon Pokopia (0400A3A01EE4C000)/Keyboard and mouse/Pokopia keyboard and mouse.ini</file>
+    </qresource>
 </RCC>

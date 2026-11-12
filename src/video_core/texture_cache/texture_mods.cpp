@@ -4,6 +4,7 @@
 #include "video_core/texture_cache/texture_mods.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -19,6 +20,7 @@
 #include "common/cityhash.h"
 #include "common/fs/path_util.h"
 #include "common/logging.h"
+#include "common/settings.h"
 #include "video_core/surface.h"
 
 namespace VideoCommon::TextureMods {
@@ -49,6 +51,7 @@ struct Replacement {
 struct State {
     std::mutex mutex;
     bool loaded = false;
+    std::atomic<int> active{-1}; // -1 not read yet, 0 nothing to do, 1 dumping or replacing
     fs::path dump_dir;
     std::set<u64> dumped;
     // "<hash>_<w>x<h>" -> the replacement; the sizes to hash at all
@@ -86,7 +89,21 @@ void Load(State& s) {
         if (!title.is_directory(ec)) {
             continue;
         }
+        // Add-ons switched off in the game's Properties are skipped, as for every other mod.
+        const std::vector<std::string>* disabled = nullptr;
+        unsigned long long title_id = 0;
+        if (std::sscanf(title.path().filename().string().c_str(), "%16llx", &title_id) == 1) {
+            if (const auto it = Settings::values.disabled_addons.find(title_id);
+                it != Settings::values.disabled_addons.end()) {
+                disabled = &it->second;
+            }
+        }
         for (const auto& mod : fs::directory_iterator(title.path(), ec)) {
+            const std::string mod_name = mod.path().filename().string();
+            if (disabled != nullptr &&
+                std::find(disabled->begin(), disabled->end(), mod_name) != disabled->end()) {
+                continue;
+            }
             const fs::path textures = mod.path() / "textures";
             if (!fs::is_directory(textures, ec)) {
                 continue;
@@ -133,15 +150,26 @@ void Dump(State& s, const ImageInfo& info, u64 hash, std::span<const u8> host,
 
 } // namespace
 
+void Reset() {
+    State& s = St();
+    std::scoped_lock lock{s.mutex};
+    s.loaded = false;
+    s.replacements.clear();
+    s.sizes.clear();
+    s.active = -1;
+}
+
 bool Active() {
-    // Mods are read once, at the first upload: new ones need a restart.
-    static const bool active = [] {
-        State& s = St();
+    // Mods are read at the first upload after Reset() (each game start).
+    State& s = St();
+    int active = s.active.load(std::memory_order_acquire);
+    if (active < 0) {
         std::scoped_lock lock{s.mutex};
         Load(s);
-        return !s.dump_dir.empty() || !s.replacements.empty();
-    }();
-    return active;
+        active = (!s.dump_dir.empty() || !s.replacements.empty()) ? 1 : 0;
+        s.active.store(active, std::memory_order_release);
+    }
+    return active == 1;
 }
 
 void OnUpload(const ImageInfo& info, std::span<const u8> guest, std::span<u8> host,

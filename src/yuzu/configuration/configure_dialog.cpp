@@ -90,6 +90,7 @@ ConfigureDialog::ConfigureDialog(QWidget* parent, HotkeyRegistry& registry_,
     hotkeys_tab->Populate(registry);
 
     input_tab->Initialize(input_subsystem);
+    pikantine_tab->SetInputSubsystem(input_subsystem);
 
     general_tab->SetResetCallback([&] { this->close(); });
 

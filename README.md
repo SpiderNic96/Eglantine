@@ -105,6 +105,15 @@ The game's button prompts show keys and mouse buttons (made with [`tools/texture
 
 The profile lives in [`mods/Pokemon Pokopia (0400A3A01EE4C000)/Keyboard and mouse`](<mods/Pokemon Pokopia (0400A3A01EE4C000)/Keyboard and mouse>), whose README lists every key.
 
+### Switching between keyboard and mouse and a DualSense
+
+Settings → Pikantine → **Controls and button icons** → **Play Pokopia with**:
+
+- **Keyboard and mouse:** Player 1 loads the keyboard and mouse profile above. It's keyboard only, as Dual Joycons, so the Joy-Con mouse mode still works. The prompts show keys and mouse buttons.
+- **DualSense (as a Pro Controller):** Player 1 becomes a Pro Controller on your DualSense, mapped by position (Cross is B, Circle is A). Connect the pad before pressing OK. The prompts show PlayStation buttons.
+
+The setting switches Player 1 at once and turns on only the matching icon add-on, so the icons change the next time the game starts. Both icon sets are texture mods made from your own game's textures with [`tools/texture_mods/pokopia_kbm_glyphs.py`](tools/texture_mods/pokopia_kbm_glyphs.py): add `--style ps` for the PlayStation set. Put them in the game's mod folder as `Keyboard and mouse glyphs` and `PlayStation glyphs`. The page shows whether each one is there. If you use the "Botoes PlayStation" RomFS mod instead, the DualSense choice turns it on when `PlayStation glyphs` isn't installed.
+
 ### Switches
 
 Most people only need Settings → **Pikantine**. These are for testing; set them before starting Eglantine (Windows Command Prompt: `set NAME=value`, then `eglantine.exe`).

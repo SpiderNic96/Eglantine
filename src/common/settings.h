@@ -861,6 +861,10 @@ struct Values {
     Setting<bool> pokopia_minimap{linkage, true, "pokopia_minimap", Category::Miscellaneous};
     Setting<u8, true> pokopia_pokemon_cap{linkage, 30, 0, 50, "pokopia_pokemon_cap",
                                           Category::Miscellaneous};
+    // Pikantine: which controls Pokopia is set up for (yuzu/configuration/configure_pikantine):
+    // 0 not chosen (left alone), 1 keyboard and mouse, 2 DualSense as a Pro Controller.
+    Setting<u8, true> pokopia_controls{linkage, 0, 0, 2, "pokopia_controls",
+                                       Category::Miscellaneous};
 
     Setting<bool> mouse_panning{
                                 linkage, false, "mouse_panning", Category::Controls, Specialization::Default, false};

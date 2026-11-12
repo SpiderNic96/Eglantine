@@ -9,27 +9,41 @@ namespace Core {
 class System;
 }
 
+namespace InputCommon {
+class InputSubsystem;
+}
+
 class QCheckBox;
+class QComboBox;
 class QLabel;
 class QSpinBox;
 
-/// Settings -> Pikantine: Pikantine's Pokémon Pokopia options (the minimap overlay and the
-/// Pokémon limit) and its Pokédex editor (pokopia_dex_dialog.h), built in code, not a .ui file.
+/// Settings -> Pikantine: Pikantine's Pokémon Pokopia options (the minimap overlay, the Pokémon
+/// limit, the controls and their button icons) and its save editor (pokopia_dex_dialog.h), built
+/// in code, not a .ui file.
 class ConfigurePikantine : public QWidget {
     Q_OBJECT
 
 public:
-    explicit ConfigurePikantine(const Core::System& system, QWidget* parent = nullptr);
+    explicit ConfigurePikantine(Core::System& system, QWidget* parent = nullptr);
     ~ConfigurePikantine() override;
 
     void ApplyConfiguration();
+    /// The input subsystem, for finding a DualSense; without it only the icons switch.
+    void SetInputSubsystem(InputCommon::InputSubsystem* input_subsystem_);
 
 private:
     void SetConfiguration();
+    void UpdateControlsNote();
+    /// Switches the button-icon add-ons and Player 1's controls; returns what it did.
+    QString SwitchControls(int controls);
 
-    const Core::System& system;
+    Core::System& system;
+    InputCommon::InputSubsystem* input_subsystem{};
 
     QCheckBox* minimap{};
     QSpinBox* pokemon_cap{};
     QLabel* pokemon_cap_note{};
+    QComboBox* controls{};
+    QLabel* controls_note{};
 };

@@ -2,7 +2,10 @@
 # SPDX-FileCopyrightText: Copyright 2026 Eglantine contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Pokémon Pokopia 2.0.1: redraws the Switch button glyphs of the game's prompt atlas as the keys
-and mouse buttons of mods/.../Keyboard and mouse/Pokopia keyboard and mouse.ini.
+and mouse buttons of mods/.../Keyboard and mouse/Pokopia keyboard and mouse.ini, or (--style ps)
+as a DualSense's buttons, matched by position: A is Circle, B Cross, X Triangle, Y Square, L/R
+L1/R1, ZL/ZR L2/R2, + Options, - Create, the stick clicks L3/R3. The D-pad and sticks are the
+same on both pads and keep the game's own art.
 
 The atlas is the 1024x1024 BC7 texture abafc68a5cb224c9 of an Eglantine texture dump
 (EDEN_TEXTURE_DUMP, see README.md). Each glyph is cleared and redrawn in the game's style (a white
@@ -11,10 +14,11 @@ cap, a 75% dark outline, dark lettering), at the glyph's own place and size.
 The title screen's "PRESS (A) BUTTON" is part of the title logo texture (eef4c6cb94636c58): its
 A disc becomes an E key, cut out of a white cap like the original.
 
-  python -I pokopia_kbm_glyphs.py <dump folder> <out folder> [--font <bold .ttf>]
+  python -I pokopia_kbm_glyphs.py <dump folder> <out folder> [--style ps] [--font <bold .ttf>]
 then pack both PNGs it writes:
   python -I texture_mod_tool.py pack <dump folder>/<name>.json <out folder>/<name>.png \
-      "<load folder>/0400A3A01EE4C000/Keyboard and mouse glyphs"
+      "<load folder>/0400A3A01EE4C000/Keyboard and mouse glyphs"     (or "PlayStation glyphs")
+Settings -> Pikantine -> Controls switches between the two mod folders by those names.
 """
 import argparse
 from pathlib import Path
@@ -49,6 +53,30 @@ GLYPHS = {
     "RStick": ((865, 593, 931, 659), ("mouse", "move")),
     "LStickPress": ((97, 513, 163, 587), ("key", "CTRL")),
     "RStickPress": ((185, 513, 251, 587), ("key", "V")),
+}
+
+
+# The same boxes as DualSense buttons. "face" draws a disc with the PlayStation symbol.
+PS_GLYPHS = {
+    "A": ("face", "circle"),
+    "B": ("face", "cross"),
+    "X": ("face", "triangle"),
+    "Y": ("face", "square"),
+    "L": ("key", "L1"),
+    "R": ("key", "R1"),
+    "ZL": ("key", "L2"),
+    "ZR": ("key", "R2"),
+    "Plus": ("key", "OPTIONS"),
+    "Minus": ("key", "CREATE"),
+    "LStickPress": ("disc", "L3"),
+    "RStickPress": ("disc", "R3"),
+}
+# The symbols' own colours on the PlayStation icons.
+PS_COLOURS = {
+    "circle": (229, 82, 91),
+    "cross": (91, 143, 214),
+    "triangle": (61, 187, 149),
+    "square": (215, 127, 182),
 }
 
 
@@ -149,6 +177,90 @@ def draw_mouse(w, h, which):
     return img
 
 
+def disc(w, h):
+    """A round button filling w x h: outline ring, white body (supersampled)."""
+    W, H = w * SS, h * SS
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    ring = 5 * SS
+    size = min(W, H)
+    x0, y0 = (W - size) // 2, (H - size) // 2
+    d.ellipse((x0, y0, x0 + size - 1, y0 + size - 1), fill=DARK + (RING_ALPHA,))
+    d.ellipse((x0 + ring, y0 + ring, x0 + size - 1 - ring, y0 + size - 1 - ring),
+              fill=(255, 255, 255, 255))
+    return img, d, (x0, y0, x0 + size, y0 + size), ring
+
+
+def symbol(d, which, box, colour, width):
+    """A PlayStation face symbol inside box, drawn with lines `width` thick."""
+    x0, y0, x1, y1 = box
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    r = (x1 - x0) / 2
+    if which == "circle":
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=colour, width=width)
+    elif which == "square":
+        q = r * 0.84
+        d.rectangle((cx - q, cy - q, cx + q, cy + q), outline=colour, width=width)
+    elif which == "cross":
+        q = r * 0.92
+        for a, b in (((cx - q, cy - q), (cx + q, cy + q)), ((cx - q, cy + q), (cx + q, cy - q))):
+            d.line((a, b), fill=colour, width=width)
+        # round the four ends like the real symbol
+        for px, py in ((cx - q, cy - q), (cx + q, cy + q), (cx - q, cy + q), (cx + q, cy - q)):
+            d.ellipse((px - width / 2, py - width / 2, px + width / 2, py + width / 2), fill=colour)
+    elif which == "triangle":
+        top = (cx, cy - r)
+        left = (cx - r * 0.98, cy + r * 0.72)
+        right = (cx + r * 0.98, cy + r * 0.72)
+        d.line((top, left, right, top), fill=colour, width=width, joint="curve")
+
+
+def draw_face(w, h, which):
+    img, d, (x0, y0, x1, y1), ring = disc(w, h)
+    inset = (x1 - x0) * 0.24
+    symbol(d, which, (x0 + inset, y0 + inset, x1 - inset, y1 - inset), PS_COLOURS[which] + (255,),
+           max(SS, int((x1 - x0) * 0.085)))
+    return img
+
+
+def draw_disc_text(w, h, label, font_path):
+    img, d, (x0, y0, x1, y1), ring = disc(w, h)
+    pad = ring + (x1 - x0) // 6
+    centered(d, label, font_path, (x0 + pad, y0 + pad + 2 * SS, x1 - pad, y1 - pad - 2 * SS))
+    return img
+
+
+def title_face(pixels, which):
+    """The title's A disc as the Circle button: the disc kept white, the symbol cut out to the
+    art's translucent dark, like the original letter."""
+    x0, y0, x1, y1 = TITLE_DISC
+    m = 4
+    region = pixels[y0 - m: y1 + m, x0 - m: x1 + m]
+    w, h = x1 - x0, y1 - y0
+    W, H = (w + 2 * m) * SS, (h + 2 * m) * SS
+    shape = Image.new("L", (W, H), 0)
+    sd = ImageDraw.Draw(shape)
+    sd.ellipse((m * SS, m * SS, (m + w) * SS - 1, (m + h) * SS - 1), fill=255)
+    out = Image.new("RGBA", (W, H), (255, 255, 255, 0))
+    out.putalpha(shape)
+    mark = Image.new("L", (W, H), 0)
+    inset = w * SS * 0.27
+    symbol(ImageDraw.Draw(mark), which,
+           (m * SS + inset, m * SS + inset, (m + w) * SS - inset, (m + h) * SS - inset), 255,
+           max(SS, int(w * SS * 0.09)))
+    hole = np.asarray(out).copy()
+    hole[np.asarray(mark) > 0] = (12, 12, 12, 77)
+    face = Image.fromarray(hole).resize((w + 2 * m, h + 2 * m), Image.LANCZOS)
+    # clear the old letter: the disc is redrawn whole on top
+    inner = np.zeros(region.shape[:2], bool)
+    yy, xx = np.mgrid[0: region.shape[0], 0: region.shape[1]]
+    inner[(xx - region.shape[1] / 2) ** 2 + (yy - region.shape[0] / 2) ** 2 <= (w / 2 + 1) ** 2] = True
+    region[inner, 3] = 0
+    base = Image.fromarray(region)
+    base.alpha_composite(face)
+    pixels[y0 - m: y1 + m, x0 - m: x1 + m] = np.asarray(base)
+
+
 def title_key(pixels, font_path):
     """The title's A disc as an E key: white cap, the letter cut out to the art's translucent
     dark, and the art's soft dark glow around it."""
@@ -188,6 +300,8 @@ def main() -> None:
     ap.add_argument("dump")
     ap.add_argument("out")
     ap.add_argument("--font", default="/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf")
+    ap.add_argument("--style", choices=("kbm", "ps"), default="kbm",
+                    help="kbm: keys and mouse (default); ps: DualSense buttons")
     args = ap.parse_args()
 
     import json
@@ -205,7 +319,10 @@ def main() -> None:
 
     pixels = load(ATLAS)
 
-    for name, ((x0, y0, x1, y1), (what, arg)) in GLYPHS.items():
+    plan = {name: (box, job) for name, (box, job) in GLYPHS.items()}
+    if args.style == "ps":
+        plan = {name: (GLYPHS[name][0], job) for name, job in PS_GLYPHS.items()}
+    for name, ((x0, y0, x1, y1), (what, arg)) in plan.items():
         # clear the old glyph with a 2-pixel margin for its soft edge
         pixels[max(0, y0 - 2): y1 + 2, max(0, x0 - 2): x1 + 2, 3] = 0
         w, h = x1 - x0, y1 - y0
@@ -213,6 +330,10 @@ def main() -> None:
             glyph = draw_key(w, h, arg, args.font)
         elif what == "wasd":
             glyph = draw_wasd(w, h, args.font)
+        elif what == "face":
+            glyph = draw_face(w, h, arg)
+        elif what == "disc":
+            glyph = draw_disc_text(w, h, arg, args.font)
         else:
             glyph = draw_mouse(w, h, arg)
         glyph = glyph.resize((w, h), Image.LANCZOS)
@@ -220,12 +341,16 @@ def main() -> None:
         region.alpha_composite(glyph)
         pixels[y0:y1, x0:x1] = np.asarray(region)
     Image.fromarray(pixels).save(out / (ATLAS + ".png"))
-    print(f"wrote {out / (ATLAS + '.png')}: {len(GLYPHS)} glyphs redrawn")
+    print(f"wrote {out / (ATLAS + '.png')}: {len(plan)} glyphs redrawn")
     if (Path(args.dump) / (TITLE + ".json")).exists():
         title = load(TITLE)
-        title_key(title, args.font)
+        if args.style == "ps":
+            title_face(title, "circle")
+        else:
+            title_key(title, args.font)
         Image.fromarray(title).save(out / (TITLE + ".png"))
-        print(f"wrote {out / (TITLE + '.png')}: PRESS (E) BUTTON")
+        print(f"wrote {out / (TITLE + '.png')}: PRESS ("
+              f"{'Circle' if args.style == 'ps' else 'E'}) BUTTON")
 
 
 if __name__ == "__main__":
