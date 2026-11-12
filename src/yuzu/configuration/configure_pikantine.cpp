@@ -85,6 +85,17 @@ bool ModInstalled(const char* name) {
     return QDir(ModFolder()).exists(QString::fromUtf8(name));
 }
 
+/// A mod folder unzipped one level too deep (<mods>/<zip name>/<name>): the folder holding it.
+QString NestedIn(const char* name) {
+    const QDir mods(ModFolder());
+    for (const QString& sub : mods.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (QDir(mods.filePath(sub)).exists(QString::fromUtf8(name))) {
+            return sub;
+        }
+    }
+    return {};
+}
+
 void SetAddon(const char* name, bool on) {
     auto& disabled = Settings::values.disabled_addons[PokopiaId];
     const auto it = std::find(disabled.begin(), disabled.end(), std::string(name));
@@ -177,6 +188,11 @@ ConfigurePikantine::ConfigurePikantine(Core::System& system_, QWidget* parent)
 
 ConfigurePikantine::~ConfigurePikantine() = default;
 
+void ConfigurePikantine::showEvent(QShowEvent* event) {
+    UpdateControlsNote(); // a mod may have been added since the page was built
+    QWidget::showEvent(event);
+}
+
 void ConfigurePikantine::SetInputSubsystem(InputCommon::InputSubsystem* input_subsystem_) {
     input_subsystem = input_subsystem_;
 }
@@ -191,10 +207,17 @@ void ConfigurePikantine::SetConfiguration() {
 
 void ConfigurePikantine::UpdateControlsNote() {
     const auto mod = [](const char* name) {
-        return ModInstalled(name) ? tr("<b>%1</b> is installed").arg(QString::fromUtf8(name))
-                                  : tr("<b>%1</b> is not installed (the game keeps its Switch "
-                                       "icons)")
-                                        .arg(QString::fromUtf8(name));
+        const QString folder = QDir::toNativeSeparators(ModFolder());
+        if (ModInstalled(name)) {
+            return tr("<b>%1</b> is installed").arg(QString::fromUtf8(name));
+        }
+        if (const QString nested = NestedIn(name); !nested.isEmpty()) {
+            return tr("<b>%1</b> is one folder too deep, inside <b>%2</b>: move it up into %3")
+                .arg(QString::fromUtf8(name), nested, folder);
+        }
+        return tr("<b>%1</b> is not installed: its folder goes in %2 (the game keeps its Switch "
+                  "icons until then)")
+            .arg(QString::fromUtf8(name), folder);
     };
     switch (controls->currentData().toInt()) {
     case KeyboardMouse:

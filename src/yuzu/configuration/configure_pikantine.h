@@ -32,6 +32,9 @@ public:
     /// The input subsystem, for finding a DualSense; without it only the icons switch.
     void SetInputSubsystem(InputCommon::InputSubsystem* input_subsystem_);
 
+protected:
+    void showEvent(QShowEvent* event) override;
+
 private:
     void SetConfiguration();
     void UpdateControlsNote();
