@@ -157,6 +157,12 @@ ConfigurePikantine::ConfigurePikantine(Core::System& system_, QWidget* parent)
     controls->addItem(tr("Keyboard and mouse"), KeyboardMouse);
     controls->addItem(tr("DualSense (as a Pro Controller)"), DualSense);
     controls_layout->addRow(tr("Play Pokopia with"), controls);
+    icons = new QComboBox(controls_box);
+    icons->addItem(tr("Drawn from Player 1's controls"), 1);
+    icons->addItem(tr("The game's own, or an icon mod"), 0);
+    controls_layout->addRow(tr("Button icons"), icons);
+    connect(icons, &QComboBox::currentIndexChanged, this,
+            &ConfigurePikantine::UpdateControlsNote);
     controls_note = new QLabel(controls_box);
     controls_note->setWordWrap(true);
     controls_layout->addRow(controls_note);
@@ -202,11 +208,19 @@ void ConfigurePikantine::SetConfiguration() {
     pokemon_cap->setValue(Settings::values.pokopia_pokemon_cap.GetValue());
     controls->setCurrentIndex(
         std::max(0, controls->findData(static_cast<int>(Settings::values.pokopia_controls.GetValue()))));
+    icons->setCurrentIndex(
+        std::max(0, icons->findData(static_cast<int>(Settings::values.pokopia_icons.GetValue()))));
     UpdateControlsNote();
 }
 
 void ConfigurePikantine::UpdateControlsNote() {
-    const auto mod = [](const char* name) {
+    const bool drawn = icons->currentData().toInt() == 1;
+    const auto mod = [drawn](const char* name) {
+        if (drawn) {
+            return tr("Prompts show what each button is bound to: keys and mouse buttons, or "
+                      "DualSense buttons (other pads keep the Switch icons). Change a bind and "
+                      "they follow from the next game start; no icon mod needed");
+        }
         const QString folder = QDir::toNativeSeparators(ModFolder());
         if (ModInstalled(name)) {
             return tr("<b>%1</b> is installed").arg(QString::fromUtf8(name));
@@ -223,33 +237,36 @@ void ConfigurePikantine::UpdateControlsNote() {
     case KeyboardMouse:
         controls_note->setText(
             tr("Player 1 gets the <b>%1</b> profile: keyboard only, as Dual Joycons, so the "
-               "Joy-Con mouse mode (middle click) still works. Prompts show keys and mouse "
-               "buttons. %2.")
+               "Joy-Con mouse mode (middle click) still works. %2.")
                 .arg(QString::fromUtf8(KbmProfile), mod(KbmIcons)));
         break;
     case DualSense:
         controls_note->setText(
             tr("Player 1 becomes a Pro Controller on your DualSense, mapped by position (Cross "
-               "is B, Circle is A). Connect it before pressing OK. Prompts show PlayStation "
-               "buttons. %1.")
+               "is B, Circle is A). Connect it before pressing OK. %1.")
                 .arg(ModInstalled(PsIcons) || !ModInstalled(PsIconsRomfs) ? mod(PsIcons)
                                                                             : mod(PsIconsRomfs)));
         break;
     default:
-        controls_note->setText(tr("Pick one to set up Player 1 and switch the prompts' button "
-                                  "icons to match. The icon mods go in %1.")
-                                   .arg(QDir::toNativeSeparators(ModFolder())));
+        controls_note->setText(
+            drawn ? tr("Pick one to set up Player 1. The prompts are drawn from Player 1's "
+                       "controls either way.")
+                  : tr("Pick one to set up Player 1 and switch the prompts' button icons to "
+                       "match. The icon mods go in %1.")
+                        .arg(QDir::toNativeSeparators(ModFolder())));
         break;
     }
 }
 
 QString ConfigurePikantine::SwitchControls(int choice) {
     QStringList done;
-    // Icons: only one set of button icons at a time.
+    // Icons: only one set of button icons at a time, and none when they are drawn from the
+    // controls (a RomFS icon mod would change the texture they are drawn into).
     const bool ps = choice == DualSense;
-    SetAddon(KbmIcons, !ps);
-    SetAddon(PsIcons, ps);
-    SetAddon(PsIconsRomfs, ps && !ModInstalled(PsIcons));
+    const bool drawn = icons->currentData().toInt() == 1;
+    SetAddon(KbmIcons, !drawn && !ps);
+    SetAddon(PsIcons, !drawn && ps);
+    SetAddon(PsIconsRomfs, !drawn && ps && !ModInstalled(PsIcons));
 
     auto* p1 = system.HIDCore().GetEmulatedController(Core::HID::NpadIdType::Player1);
     if (choice == KeyboardMouse) {
@@ -330,7 +347,14 @@ void ConfigurePikantine::ApplyConfiguration() {
         const QString done = SwitchControls(choice);
         QMessageBox::information(
             this, tr("Pikantine"),
-            tr("%1\n\nThe button icons switch the next time Pokopia starts.").arg(done));
+            tr("%1\n\nThe button icons change the next time Pokopia starts.").arg(done));
+    }
+    const int drawn = icons->currentData().toInt();
+    if (drawn == 1 && Settings::values.pokopia_icons.GetValue() != 1) {
+        for (const char* name : {KbmIcons, PsIcons, PsIconsRomfs}) {
+            SetAddon(name, false);
+        }
     }
     Settings::values.pokopia_controls = static_cast<u8>(choice);
+    Settings::values.pokopia_icons = static_cast<u8>(drawn);
 }

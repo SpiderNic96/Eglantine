@@ -22,6 +22,7 @@
 #include "common/logging.h"
 #include "common/settings.h"
 #include "video_core/surface.h"
+#include "video_core/texture_cache/pokopia_glyphs.h"
 
 namespace VideoCommon::TextureMods {
 
@@ -166,7 +167,12 @@ bool Active() {
     if (active < 0) {
         std::scoped_lock lock{s.mutex};
         Load(s);
-        active = (!s.dump_dir.empty() || !s.replacements.empty()) ? 1 : 0;
+        if (PokopiaGlyphs::HasPlan()) {
+            s.sizes.emplace(PokopiaGlyphs::TextureSize, PokopiaGlyphs::TextureSize);
+        }
+        active = (!s.dump_dir.empty() || !s.replacements.empty() || PokopiaGlyphs::HasPlan())
+                     ? 1
+                     : 0;
         s.active.store(active, std::memory_order_release);
     }
     return active == 1;
@@ -190,8 +196,23 @@ void OnUpload(const ImageInfo& info, std::span<const u8> guest, std::span<u8> ho
     if (dump) {
         Dump(s, info, hash, host.first(host_size), copies);
     }
+    // Pokopia's button prompts, drawn from the player's controls, over the texture as it is
+    // after any replacement.
+    const auto glyphs = [&] {
+        if (copies.empty() || info.size.width != PokopiaGlyphs::TextureSize) {
+            return;
+        }
+        const BufferImageCopy& level0 = copies[0];
+        const std::size_t row_bytes = static_cast<std::size_t>(level0.buffer_row_length / 4) * 16;
+        if (level0.buffer_offset + level0.buffer_size > host.size()) {
+            return;
+        }
+        PokopiaGlyphs::Apply(hash, info.size.width, info.size.height,
+                             host.subspan(level0.buffer_offset, level0.buffer_size), row_bytes);
+    };
     const auto it = s.replacements.find(Key(hash, info.size.width, info.size.height));
     if (it == s.replacements.end()) {
+        glyphs();
         return;
     }
     Replacement& r = it->second;
@@ -212,6 +233,7 @@ void OnUpload(const ImageInfo& info, std::span<const u8> guest, std::span<u8> ho
         LOG_INFO(HW_GPU, "Texture replacement {}: in use", r.path.filename().string());
     }
     std::copy(r.data.begin(), r.data.end(), host.begin());
+    glyphs();
 }
 
 } // namespace VideoCommon::TextureMods

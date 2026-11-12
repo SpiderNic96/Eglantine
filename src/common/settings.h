@@ -865,6 +865,9 @@ struct Values {
     // 0 not chosen (left alone), 1 keyboard and mouse, 2 DualSense as a Pro Controller.
     Setting<u8, true> pokopia_controls{linkage, 0, 0, 2, "pokopia_controls",
                                        Category::Miscellaneous};
+    // Pikantine: Pokopia's button prompts: 1 drawn from Player 1's controls
+    // (yuzu/pokopia_glyph_plan), 0 the game's own (or an icon mod's).
+    Setting<u8, true> pokopia_icons{linkage, 1, 0, 1, "pokopia_icons", Category::Miscellaneous};
 
     Setting<bool> mouse_panning{
                                 linkage, false, "mouse_panning", Category::Controls, Specialization::Default, false};

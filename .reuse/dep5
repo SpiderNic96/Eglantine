@@ -147,6 +147,10 @@ Files: externals/stb/*
 Copyright: Sean Barrett
 License: MIT
 
+Files: externals/bc7enc/*
+Copyright: 2020-2021 Richard Geldreich, Jr.
+License: MIT
+
 Files: externals/gamemode/*
 Copyright: Copyright 2017-2019 Feral Interactive
 License: BSD-3-Clause

@@ -48,5 +48,6 @@ private:
     QSpinBox* pokemon_cap{};
     QLabel* pokemon_cap_note{};
     QComboBox* controls{};
+    QComboBox* icons{};
     QLabel* controls_note{};
 };

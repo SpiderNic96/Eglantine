@@ -281,6 +281,8 @@ add_library(video_core STATIC
     texture_cache/texture_cache.h
     texture_cache/texture_cache_base.h
     texture_cache/types.h
+    texture_cache/pokopia_glyphs.cpp
+    texture_cache/pokopia_glyphs.h
     texture_cache/texture_mods.cpp
     texture_cache/texture_mods.h
     texture_cache/util.cpp
@@ -439,7 +441,7 @@ if (ENABLE_OPENGL)
 endif()
 
 target_link_libraries(video_core PUBLIC common core)
-target_link_libraries(video_core PUBLIC shader_recompiler stb bc_decoder gpu_logging)
+target_link_libraries(video_core PUBLIC shader_recompiler stb bc_decoder bc7enc gpu_logging)
 if (ENABLE_OPENGL)
     target_link_libraries(video_core PUBLIC glad)
 endif()

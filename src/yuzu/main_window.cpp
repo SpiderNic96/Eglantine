@@ -44,6 +44,7 @@
 #include "util/util.h"
 #include "yuzu/game/game_list.h"
 #include "yuzu/nup_dialogs.h"
+#include "yuzu/pokopia_glyph_plan.h"
 
 #include "applets/qt_amiibo_settings.h"
 #include "applets/qt_controller.h"
@@ -2023,6 +2024,8 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
         LOG_INFO(Config, "Applied recommended MKW settings after per-game configuration");
     }
     Settings::LogSettings();
+    // Pikantine: Pokopia's button prompts drawn from the controls just loaded.
+    Pikantine::SetPokopiaGlyphPlan(input_subsystem.get(), title_id == 0x0400A3A01EE4C000ULL);
 
     if (UISettings::values.select_user_on_boot && !user_flag_cmd_line) {
         const Core::Frontend::ProfileSelectParameters parameters{

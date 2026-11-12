@@ -300,6 +300,10 @@ target_include_directories(tz PUBLIC ./tz)
 add_library(bc_decoder bc_decoder/bc_decoder.cpp)
 target_include_directories(bc_decoder PUBLIC ./bc_decoder)
 
+# bc7enc (Richard Geldreich, MIT or public domain): Pikantine redraws Pokopia's button prompts
+add_library(bc7enc bc7enc/bc7enc.cpp)
+target_include_directories(bc7enc PUBLIC ./bc7enc)
+
 if (NOT TARGET RenderDoc::API)
     add_library(renderdoc INTERFACE)
     target_include_directories(renderdoc SYSTEM INTERFACE ./renderdoc)
