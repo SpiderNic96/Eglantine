@@ -18,6 +18,9 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
+import android.provider.OpenableColumns;
+import android.database.Cursor;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
@@ -55,6 +58,7 @@ import dev.pikantine.saveeditor.core.PokopiaSave;
  */
 public final class MainActivity extends Activity {
     private static final int PICK_FOLDER = 1;
+    private static final int PICK_FILE = 2;
     private static final String[] TABS = {"Pokédex", "Habitats", "Recipes", "Moves", "Reactions",
                                           "Bag", "Residents", "Flags"};
     private static final int GREEN = Color.rgb(0x4c, 0xaf, 0x50);
@@ -198,8 +202,9 @@ public final class MainActivity extends Activity {
         if (last != null) {
             openTree(Uri.parse(last), false);
         } else {
-            status.setText("Close the game first, then tap \"Open save folder\" and pick your "
-                    + "Pokopia save folder (0400A3A01EE4C000, or the G00 inside it).");
+            status.setText("Close the game first. Then tap \"Open save folder\" and pick the "
+                    + "Pokopia save folder (0400A3A01EE4C000, or the G00 inside it), or tap "
+                    + "\"Open save file\" and pick CMNDAT.BIN itself.");
         }
     }
 
@@ -223,15 +228,43 @@ public final class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(8), dp(8), dp(8), dp(8));
+        // Android 15 draws apps under the status and navigation bars: keep everything clear of them.
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            int l, t, r, b;
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets i = insets.getInsets(WindowInsets.Type.systemBars()
+                        | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
+                l = i.left; t = i.top; r = i.right; b = i.bottom;
+            } else {
+                l = insets.getSystemWindowInsetLeft(); t = insets.getSystemWindowInsetTop();
+                r = insets.getSystemWindowInsetRight(); b = insets.getSystemWindowInsetBottom();
+            }
+            v.setPadding(dp(8) + l, dp(8) + t, dp(8) + r, dp(8) + b);
+            return insets;
+        });
+
+        TextView heading = new TextView(this);
+        heading.setText("Pikantine Save Editor");
+        heading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+        heading.setTypeface(Typeface.DEFAULT_BOLD);
+        heading.setPadding(dp(4), 0, dp(4), dp(4));
+        root.addView(heading);
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         Button open = new Button(this);
         open.setText("Open save folder");
+        open.setAllCaps(false);
         open.setOnClickListener(v -> pickFolder());
-        top.addView(open);
+        top.addView(open, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        Button file = new Button(this);
+        file.setText("Open save file");
+        file.setAllCaps(false);
+        file.setOnClickListener(v -> pickFile());
+        top.addView(file, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         Button restore = new Button(this);
         restore.setText("Backups");
+        restore.setAllCaps(false);
         restore.setOnClickListener(v -> showBackups());
         top.addView(restore);
         root.addView(top);
@@ -346,9 +379,41 @@ public final class MainActivity extends Activity {
         startActivityForResult(i, PICK_FOLDER);
     }
 
+    private void pickFile() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(i, PICK_FILE);
+    }
+
+    private String displayName(Uri uri) {
+        try (Cursor c = getContentResolver().query(uri,
+                new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                return c.getString(0);
+            }
+        } catch (RuntimeException e) {
+            // fall through
+        }
+        return uri.getLastPathSegment();
+    }
+
     @Override
     protected void onActivityResult(int request, int result, Intent intent) {
         super.onActivityResult(request, result, intent);
+        if (request == PICK_FILE && result == RESULT_OK && intent != null && intent.getData() != null) {
+            Uri file = intent.getData();
+            try {
+                getContentResolver().takePersistableUriPermission(file,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            } catch (SecurityException e) {
+                // works for this session only
+            }
+            loadSave(new SaveFolder.Found(file, displayName(file)));
+            return;
+        }
         if (request != PICK_FOLDER || result != RESULT_OK || intent == null || intent.getData() == null) {
             return;
         }
