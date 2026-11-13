@@ -1,0 +1,65 @@
+name: Save editor (Android)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "android-save-editor/**"
+      - ".github/workflows/save-editor-android.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-save-editor
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          mkdir -p out
+          cp app/build/outputs/apk/release/*.apk "out/Pikantine-Save-Editor-test-${GITHUB_RUN_NUMBER}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pikantine-save-editor-apk
+          path: android-save-editor/out/*.apk
+
+      - name: Publish the test release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="save-editor-test-${GITHUB_RUN_NUMBER}"
+          cat > notes.md <<'EOF'
+          Test build of the Pikantine save editor for Android: a standalone app that edits a Pokopia save on your phone.
+
+          How to use:
+          1. Close the game in your emulator first.
+          2. Install the APK and open it.
+          3. Tap **Open save folder** and pick the Pokopia save folder (`0400A3A01EE4C000`, or the `G00` inside it) from your emulator's storage.
+          4. Use the tabs (Pokédex, Habitats, Recipes, Moves, Reactions, Bag, Residents, Flags) to make changes, then tap **Save**.
+
+          Every save copies the old file into the app's backups first; **Backups** puts one back.
+
+          This is a test build, signed with a debug key. Keep your own copy of the save as well.
+          EOF
+          gh release create "${tag}" out/*.apk \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "Pikantine Save Editor for Android (test ${GITHUB_RUN_NUMBER})" \
+            --notes-file notes.md \
+            --prerelease
